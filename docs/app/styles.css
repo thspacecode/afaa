@@ -1,0 +1,4 @@
+@import "@the-docs/ui/globals.css";
+
+/* Include utility classes used by the compiled The Docs packages. */
+@source "../node_modules/@the-docs";

@@ -1,0 +1,52 @@
+---
+title: Getting Started
+description: Install AFAA and prepare a Frappe site for AI configuration.
+---
+
+## Overview
+
+AFAA is an extensible AI configuration and execution layer for Frappe. It keeps
+provider, model, prompt, tool, skill, and agent configuration in your Frappe
+site while allowing apps to register provider and tool implementations in code.
+
+## Requirements
+
+- Frappe Framework version 16
+- Node.js 24 or newer for building these docs
+- A supported provider SDK for each AI provider you plan to use
+
+## Install AFAA
+
+From your bench directory, download the app and install it on a site:
+
+```bash
+bench get-app https://github.com/thspacecode/afaa.git --branch version-16
+bench --site $SITE install-app afaa
+```
+
+AFAA installs `pydantic-ai-slim` without optional provider dependencies. Install
+only the provider integrations required by your deployment. For example:
+
+```bash
+./env/bin/pip install "pydantic-ai-slim[google]~=2.33.0"
+```
+
+After adding or changing provider dependencies, restart the bench processes so
+AFAA can detect the available adapters.
+
+## Develop the documentation
+
+Run the documentation site from the app repository:
+
+```bash
+cd apps/afaa/docs
+pnpm install
+pnpm dev
+```
+
+Before submitting documentation changes, run:
+
+```bash
+pnpm typecheck
+pnpm build
+```
