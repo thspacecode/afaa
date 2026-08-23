@@ -1,0 +1,118 @@
+{
+ "actions": [],
+ "allow_bulk_edit": 1,
+ "autoname": "field:provider_name",
+ "creation": "2026-08-22 18:14:11.428171",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "disabled",
+  "provider_name",
+  "provider_type",
+  "connection_section",
+  "api_key",
+  "connection_column",
+  "advanced_section",
+  "provider_settings"
+ ],
+ "fields": [
+  {
+   "fieldname": "provider_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Provider Name",
+   "read_only": 1,
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "provider_type",
+   "fieldtype": "Autocomplete",
+   "in_list_view": 1,
+   "label": "Provider Type",
+   "reqd": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "disabled",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Disabled"
+  },
+  {
+   "fieldname": "connection_section",
+   "fieldtype": "Section Break",
+   "hidden": 1,
+   "label": "Connection"
+  },
+  {
+   "description": "Legacy field retained for migration. Configure credentials in AI Provider Account.",
+   "fieldname": "api_key",
+   "fieldtype": "Password",
+   "hidden": 1,
+   "label": "API Key",
+   "length": 512
+  },
+  {
+   "fieldname": "connection_column",
+   "fieldtype": "Column Break",
+   "hidden": 1
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "advanced_section",
+   "fieldtype": "Section Break",
+   "hidden": 1,
+   "label": "Advanced"
+  },
+  {
+   "description": "Legacy field retained for migration. Configure credentials in AI Provider Account.",
+   "fieldname": "provider_settings",
+   "fieldtype": "JSON",
+   "hidden": 1,
+   "label": "Provider Settings"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-08-22 19:42:39.868256",
+ "modified_by": "Administrator",
+ "module": "AFAA Setup",
+ "name": "AI Provider",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "AI Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "rows_threshold_for_grid_search": 20,
+ "search_fields": "provider_name,provider_type",
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "provider_name",
+ "track_changes": 1
+}

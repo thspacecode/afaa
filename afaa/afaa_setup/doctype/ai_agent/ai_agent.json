@@ -1,0 +1,278 @@
+{
+ "actions": [],
+ "allow_bulk_edit": 1,
+ "autoname": "field:agent_key",
+ "creation": "2026-08-22 11:39:49.348458",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "details_tab",
+  "disabled_section",
+  "disabled",
+  "identity_section",
+  "agent_name",
+  "identity_column",
+  "agent_key",
+  "description_section",
+  "description",
+  "system_prompt_section",
+  "system_prompt",
+  "runtime_tab",
+  "runtime_section",
+  "model",
+  "provider",
+  "provider_account",
+  "runtime_column",
+  "timeout",
+  "retries",
+  "model_settings_section",
+  "use_temperature",
+  "temperature",
+  "model_settings_column",
+  "max_tokens",
+  "model_overrides",
+  "tasks_tab",
+  "tasks_section",
+  "tasks",
+  "skills_tab",
+  "skills_section",
+  "skills",
+  "tools_tab",
+  "tools_section",
+  "allowed_tools"
+ ],
+ "fields": [
+  {
+   "fieldname": "agent_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Agent Name",
+   "reqd": 1
+  },
+  {
+   "description": "Stable routing key, using lowercase letters, numbers, underscores, or hyphens.",
+   "fieldname": "agent_key",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Agent Key",
+   "reqd": 1,
+   "show_description_on_click": 1,
+   "unique": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "disabled",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Disabled"
+  },
+  {
+   "fieldname": "description",
+   "fieldtype": "Small Text",
+   "label": "Description"
+  },
+  {
+   "fieldname": "runtime_section",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "model",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Model",
+   "options": "AI Model",
+   "reqd": 1
+  },
+  {
+   "fieldname": "runtime_column",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "120",
+   "fieldname": "timeout",
+   "fieldtype": "Duration",
+   "label": "Timeout"
+  },
+  {
+   "default": "2",
+   "fieldname": "retries",
+   "fieldtype": "Int",
+   "label": "Retries"
+  },
+  {
+   "description": "Additional Pydantic AI model settings. These override the fields above when the same key is provided.",
+   "fieldname": "model_overrides",
+   "fieldtype": "JSON",
+   "label": "Additional Model Settings"
+  },
+  {
+   "fieldname": "skills_section",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "skills",
+   "fieldtype": "Table",
+   "label": "Skills",
+   "options": "AI Agent Skill"
+  },
+  {
+   "fieldname": "tools_section",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "allowed_tools",
+   "fieldtype": "Table",
+   "label": "Allowed Tools",
+   "options": "AI Agent Tool"
+  },
+  {
+   "fieldname": "system_prompt",
+   "fieldtype": "Code",
+   "label": "System Prompt",
+   "options": "Jinja",
+   "reqd": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "use_temperature",
+   "fieldtype": "Check",
+   "label": "Override Temperature"
+  },
+  {
+   "depends_on": "eval:doc.use_temperature",
+   "fieldname": "temperature",
+   "fieldtype": "Float",
+   "label": "Temperature",
+   "mandatory_depends_on": "eval:doc.use_temperature",
+   "precision": "2"
+  },
+  {
+   "fieldname": "max_tokens",
+   "fieldtype": "Int",
+   "label": "Max Tokens"
+  },
+  {
+   "fieldname": "model_settings_section",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "model_settings_column",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "tasks_section",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "tasks",
+   "fieldtype": "Table",
+   "label": "Task Definitions",
+   "options": "AI Agent Task Assignment"
+  },
+  {
+   "fieldname": "disabled_section",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "identity_section",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "identity_column",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "description_section",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "system_prompt_section",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "details_tab",
+   "fieldtype": "Tab Break",
+   "label": "Details"
+  },
+  {
+   "fieldname": "runtime_tab",
+   "fieldtype": "Tab Break",
+   "label": "Runtime"
+  },
+  {
+   "fieldname": "tasks_tab",
+   "fieldtype": "Tab Break",
+   "label": "Task Definitions"
+  },
+  {
+   "fieldname": "skills_tab",
+   "fieldtype": "Tab Break",
+   "label": "Skills"
+  },
+  {
+   "fieldname": "tools_tab",
+   "fieldtype": "Tab Break",
+   "label": "Allowed Tools"
+  },
+  {
+   "description": "Credentials used by this agent. The account must belong to the selected model's provider.",
+   "fieldname": "provider_account",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Provider Account",
+   "options": "AI Provider Account",
+   "reqd": 1
+  },
+  {
+   "fetch_from": "model.provider",
+   "fieldname": "provider",
+   "fieldtype": "Link",
+   "label": "Provider",
+   "options": "AI Provider",
+   "read_only": 1,
+   "reqd": 1
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-08-23 15:33:25.185450",
+ "modified_by": "Administrator",
+ "module": "AFAA Setup",
+ "name": "AI Agent",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "AI Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "rows_threshold_for_grid_search": 20,
+ "search_fields": "agent_key,agent_name,model,provider_account",
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "agent_name",
+ "track_changes": 1
+}

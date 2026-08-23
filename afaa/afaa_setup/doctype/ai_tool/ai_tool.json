@@ -1,0 +1,181 @@
+{
+ "actions": [],
+ "allow_bulk_edit": 1,
+ "autoname": "field:tool_key",
+ "creation": "2026-08-22 11:39:48.297493",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "details_tab",
+  "disabled_section",
+  "disabled",
+  "identity_section",
+  "tool_name",
+  "identity_column",
+  "tool_key",
+  "description_section",
+  "description",
+  "registration_tab",
+  "registration_section",
+  "source_app",
+  "available",
+  "registration_column",
+  "method",
+  "schemas_tab",
+  "schema_section",
+  "input_schema",
+  "output_schema"
+ ],
+ "fields": [
+  {
+   "description": "Stable routing key, using lowercase letters, numbers, underscores, or hyphens.",
+   "fieldname": "tool_key",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Tool Key",
+   "read_only": 1,
+   "reqd": 1,
+   "show_description_on_click": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "tool_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Tool Name",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "disabled",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Disabled"
+  },
+  {
+   "default": "0",
+   "description": "Indicates whether an installed app currently registers or provides the tool implementation.",
+   "fieldname": "available",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Available",
+   "read_only": 1
+  },
+  {
+   "fieldname": "description",
+   "fieldtype": "Small Text",
+   "label": "Description",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "registration_section",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "source_app",
+   "fieldtype": "Data",
+   "in_standard_filter": 1,
+   "label": "Source App",
+   "read_only": 1
+  },
+  {
+   "fieldname": "method",
+   "fieldtype": "Data",
+   "label": "Method",
+   "read_only": 1
+  },
+  {
+   "fieldname": "schema_section",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "input_schema",
+   "fieldtype": "JSON",
+   "label": "Input Schema",
+   "read_only": 1
+  },
+  {
+   "fieldname": "output_schema",
+   "fieldtype": "JSON",
+   "label": "Output Schema",
+   "read_only": 1
+  },
+  {
+   "fieldname": "registration_column",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "disabled_section",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "identity_section",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "identity_column",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "description_section",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "details_tab",
+   "fieldtype": "Tab Break",
+   "label": "Details"
+  },
+  {
+   "fieldname": "registration_tab",
+   "fieldtype": "Tab Break",
+   "label": "Registration"
+  },
+  {
+   "fieldname": "schemas_tab",
+   "fieldtype": "Tab Break",
+   "label": "Schemas"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-08-22 19:14:19.050286",
+ "modified_by": "Administrator",
+ "module": "AFAA Setup",
+ "name": "AI Tool",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "AI Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "rows_threshold_for_grid_search": 20,
+ "search_fields": "tool_key,tool_name,source_app",
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "tool_name",
+ "track_changes": 1
+}

@@ -1,9 +1,22 @@
 app_name = "afaa"
 app_title = "AFAA"
 app_publisher = "SpaceCode"
-app_description = " "
+app_description = "A thin, extensible AI configuration and execution layer for Frappe"
 app_email = "p@spacecode.co.th"
-app_license = "unlicense"
+app_license = "AGPL-3.0"
+app_logo_url = "/assets/afaa/images/afaa_icon.svg"
+app_home = "/desk/afaa"
+
+# Keep code-registered tools synchronized without deleting user enablement choices.
+after_migrate = "afaa.ai.tools.sync_registered_tools"
+
+# Records tightly coupled to AFAA's permission model.
+fixtures = [
+	{"doctype": "Role", "filters": [["name", "in", ["AI Manager"]]]},
+]
+
+# Automatically update python controller files with type annotations for this app.
+export_python_type_annotations = True
 
 # Apps
 # ------------------
@@ -87,6 +100,9 @@ app_license = "unlicense"
 
 # before_install = "afaa.install.before_install"
 # after_install = "afaa.install.after_install"
+
+# Extension hook for provider apps:
+# afaa_ai_providers = ["another_app.ai.providers.CustomProvider"]
 
 # Uninstallation
 # ------------
@@ -243,9 +259,6 @@ app_license = "unlicense"
 # auth_hooks = [
 # 	"afaa.auth.validate"
 # ]
-
-# Automatically update python controller files with type annotations for this app.
-# export_python_type_annotations = True
 
 # default_log_clearing_doctypes = {
 # 	"Logging DocType Name": 30  # days to retain logs
