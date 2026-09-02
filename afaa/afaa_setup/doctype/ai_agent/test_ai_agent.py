@@ -3,6 +3,7 @@
 
 import frappe
 
+from afaa.ai.external_runtime import resolve_external_runtime
 from afaa.ai.runtime import resolve_ai_agent
 from afaa.tests.data.factories import AIAgentFactory, AISkillFactory, AITaskDefinitionFactory
 from afaa.tests.utils import AFAATestSuite, boot_strap_test_master_data
@@ -30,6 +31,28 @@ class TestAIAgent(AFAATestSuite):
 		self.assertEqual(resolved.model.provider_account, boot_strap_test_master_data.provider_account)
 		self.assertEqual(resolved.model.settings, {"seed": 42, "temperature": 0.4, "max_tokens": 500})
 		self.assertEqual(resolved.prompt, "You are a test agent.")
+
+	def test_external_runtime_contract_keeps_api_key_secret(self):
+		key = f"agent-{frappe.generate_hash(length=8).lower()}"
+		AIAgentFactory.create(
+			agent_name="External Agent",
+			agent_key=key,
+			model=boot_strap_test_master_data.model,
+			provider_account=boot_strap_test_master_data.provider_account,
+			system_prompt="Review the workspace.",
+		)
+
+		account = frappe.get_doc("AI Provider Account", boot_strap_test_master_data.provider_account)
+		account.api_key = "server-only-test-key"
+		account.save(ignore_permissions=True)
+		resolved = resolve_external_runtime(key)
+		public_dump = resolved.model_dump(mode="json", by_alias=True)
+		private_dump = resolved.private_payload()
+
+		self.assertEqual(resolved.agent_id, f"afaa:{key}")
+		self.assertEqual(public_dump["model"]["apiKey"], "**********")
+		self.assertNotEqual(private_dump["model"]["apiKey"], "**********")
+		self.assertEqual(len(resolved.configuration_fingerprint), 64)
 
 	def test_skill_cannot_escalate_tool_access(self):
 		tool_key = self.create_tool()
