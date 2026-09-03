@@ -3,16 +3,19 @@
 
 """Frappe persistence and request lifecycle for OpenAI Codex device OAuth."""
 
+import datetime
 import hashlib
 import math
 import secrets
 import time
 from urllib.parse import urlsplit
+from zoneinfo import ZoneInfo
 
 import frappe
 from frappe import _
-from frappe.utils import cint, now_datetime
+from frappe.utils import cint, get_datetime, get_system_timezone, now_datetime
 from frappe.utils.synchronization import filelock
+from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
 from afaa.ai.oauth.openai_codex import (
 	CONNECTED_APP_NAME,
@@ -32,6 +35,31 @@ FLOW_KEY_PREFIX = "afaa:openai_codex:oauth_flow:"
 
 class CodexAuthenticationError(frappe.ValidationError):
 	"""A user-facing authentication error which never includes provider response data."""
+
+
+class CodexReconnectRequiredError(CodexAuthenticationError):
+	category = "reconnect"
+
+
+class CodexWorkspaceAuthorizationError(CodexAuthenticationError):
+	category = "workspace_authorization"
+
+
+class CodexUsageLimitError(CodexAuthenticationError):
+	category = "usage_limit"
+
+
+class CodexTemporaryRefreshError(CodexAuthenticationError):
+	category = "temporary_refresh_failure"
+
+
+class CodexTokenResult(BaseModel):
+	"""A short-lived access token and its persisted absolute Unix expiry."""
+
+	model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
+
+	access_token: SecretStr = Field(repr=False)
+	expires_at: int = Field(gt=0)
 
 
 def start_oauth_login(account) -> dict:
@@ -142,24 +170,47 @@ def poll_oauth_login(account, flow_id: str) -> dict:
 		return _complete_oauth_login(account, flow_id, state, grant)
 
 
-def resolve_codex_access_token(account, minimum_validity: int = 300) -> str:
+def resolve_codex_access_token(
+	account,
+	minimum_validity: int = 300,
+	*,
+	force_refresh: bool = False,
+) -> CodexTokenResult:
+	"""Resolve a cached token or perform one serialized refresh.
+
+	Every caller enters the same lock. A forced waiter reuses a token rotated while it
+	was waiting, but otherwise refreshes even when the cached expiry is still valid.
+	"""
 	_validate_codex_account(account)
-	minimum_validity = max(cint(minimum_validity), 0)
-	if account.oauth_status != "Connected" or not account.connected_user:
-		raise CodexAuthenticationError(_("ChatGPT authorization expired; reconnect account."))
+	if type(force_refresh) is not bool:
+		raise CodexTemporaryRefreshError(_("Unable to refresh ChatGPT authorization; try again."))
+	minimum_validity = max(cint(minimum_validity), 300)
+	if account.disabled or account.oauth_status != "Connected" or not account.connected_user:
+		raise CodexReconnectRequiredError(_("ChatGPT authorization expired; reconnect account."))
 
 	token_cache = _get_token_cache(account.connected_user)
-	if not token_cache or not token_cache.get_password("access_token", raise_exception=False):
+	if not token_cache:
 		_require_reconnection(account)
-
-	if token_cache.get_expires_in() > minimum_validity:
-		return token_cache.get_password("access_token", raise_exception=False)
+	initial_modified = str(token_cache.modified)
 
 	lock_name = "afaa_codex_token_" + hashlib.sha256(token_cache.name.encode()).hexdigest()
 	with filelock(lock_name):
+		account.reload()
+		_validate_codex_account(account)
+		if account.disabled or account.oauth_status != "Connected" or not account.connected_user:
+			raise CodexReconnectRequiredError(_("ChatGPT authorization expired; reconnect account."))
+
+		token_cache = _get_token_cache(account.connected_user)
+		if not token_cache:
+			_require_reconnection(account)
 		token_cache.reload()
-		if token_cache.get_expires_in() > minimum_validity:
-			return token_cache.get_password("access_token", raise_exception=False)
+		access_token = token_cache.get_password("access_token", raise_exception=False)
+		if not access_token:
+			_require_reconnection(account)
+
+		rotated_while_waiting = str(token_cache.modified) != initial_modified
+		if token_cache.get_expires_in() > minimum_validity and (not force_refresh or rotated_while_waiting):
+			return _token_result(token_cache, access_token)
 
 		refresh_token = token_cache.get_password("refresh_token", raise_exception=False)
 		if not refresh_token:
@@ -170,18 +221,25 @@ def resolve_codex_access_token(account, minimum_validity: int = 300) -> str:
 			_validate_refreshed_identity(account, tokens)
 		except CodexOAuthError as error:
 			if _is_permanent_refresh_failure(error):
-				message = (
-					_("Account or workspace is not authorized for Codex.")
-					if error.status_code == 403
-					else _("ChatGPT authorization expired; reconnect account.")
-				)
-				_require_reconnection(account, message)
+				if error.status_code == 403:
+					_require_reconnection(
+						account,
+						_("Account or workspace is not authorized for Codex."),
+						error_type=CodexWorkspaceAuthorizationError,
+					)
+				_require_reconnection(account)
 			if error.status_code == 429:
-				raise frappe.ValidationError(_("ChatGPT/Codex subscription usage limit reached.")) from None
-			raise frappe.ValidationError(_("Unable to refresh ChatGPT authorization; try again.")) from None
+				raise CodexUsageLimitError(_("ChatGPT/Codex subscription usage limit reached.")) from None
+			raise CodexTemporaryRefreshError(
+				_("Unable to refresh ChatGPT authorization; try again.")
+			) from None
 
 		_persist_token_cache(token_cache, tokens)
-		return tokens.access_token
+		# Make the rotation visible before releasing the cross-process lock. Otherwise
+		# a waiter can acquire the lock before Frappe's request-end commit and refresh
+		# the same old refresh token a second time.
+		frappe.db.commit()
+		return _token_result(token_cache, tokens.access_token)
 
 
 def disconnect_oauth(account) -> None:
@@ -196,20 +254,29 @@ def disconnect_oauth(account) -> None:
 				except Exception as error:
 					_log_sanitized_revocation_error(error)
 	finally:
-		if token_cache:
-			token_cache.delete(ignore_permissions=True, force=True)
+		try:
+			if token_cache:
+				token_cache.delete(ignore_permissions=True, force=True)
+		finally:
+			account.db_set(
+				{
+					"connected_user": None,
+					"oauth_status": "Not Connected",
+					"external_account_id": None,
+					"external_account_email": None,
+					"subscription_plan": None,
+					"oauth_connected_on": None,
+				},
+				notify=True,
+			)
+			_notify_provider_account_invalidated(account.name)
 
-	account.db_set(
-		{
-			"connected_user": None,
-			"oauth_status": "Not Connected",
-			"external_account_id": None,
-			"external_account_email": None,
-			"subscription_plan": None,
-			"oauth_connected_on": None,
-		},
-		notify=True,
-	)
+
+def report_codex_authentication_failure(account) -> None:
+	"""Fail closed after a freshly forced token is rejected by the provider."""
+	_validate_codex_account(account)
+	_set_account_status(account, "Expired", commit=True)
+	_notify_provider_account_invalidated(account.name)
 
 
 def get_codex_oauth_client() -> OpenAICodexOAuthClient:
@@ -265,6 +332,14 @@ def _complete_oauth_login(account, flow_id: str, state: dict, grant: Authorizati
 
 	_delete_flow(flow_id)
 	return {"status": "complete"}
+
+
+def _token_result(token_cache, access_token: str) -> CodexTokenResult:
+	modified = get_datetime(token_cache.modified)
+	if modified.tzinfo is None:
+		modified = modified.replace(tzinfo=ZoneInfo(get_system_timezone()))
+	expires_at = int(modified.astimezone(datetime.UTC).timestamp() + max(cint(token_cache.expires_in), 0))
+	return CodexTokenResult(access_token=SecretStr(access_token), expires_at=expires_at)
 
 
 def _persist_token_cache(token_cache, tokens: OAuthTokens) -> None:
@@ -362,11 +437,21 @@ def _set_account_status(account, status: str, *, commit: bool = False) -> None:
 	account.db_set("oauth_status", status, notify=True, commit=commit)
 
 
-def _require_reconnection(account, message: str | None = None):
+def _require_reconnection(
+	account,
+	message: str | None = None,
+	*,
+	error_type: type[CodexAuthenticationError] = CodexReconnectRequiredError,
+):
 	_set_account_status(account, "Expired", commit=True)
-	raise CodexAuthenticationError(
-		message or _("ChatGPT authorization expired; reconnect account.")
-	) from None
+	_notify_provider_account_invalidated(account.name)
+	raise error_type(message or _("ChatGPT authorization expired; reconnect account.")) from None
+
+
+def _notify_provider_account_invalidated(provider_account: str) -> None:
+	from afaa.ai.external_runtime import notify_provider_account_invalidated
+
+	notify_provider_account_invalidated(provider_account)
 
 
 def _get_oauth_completion_failure_message(error: CodexOAuthError) -> str:

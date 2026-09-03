@@ -2,11 +2,15 @@
 # See license.txt
 
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import frappe
 
-from afaa.ai.external_runtime import resolve_external_runtime
+from afaa.ai.external_runtime import (
+	CodexExternalRuntimeConfig,
+	notify_provider_account_invalidated,
+	resolve_external_runtime,
+)
 from afaa.ai.runtime import resolve_ai_agent
 from afaa.tests.data.factories import AIAgentFactory, AISkillFactory, AITaskDefinitionFactory
 from afaa.tests.utils import AFAATestSuite, boot_strap_test_master_data
@@ -57,19 +61,61 @@ class TestAIAgent(AFAATestSuite):
 		self.assertNotEqual(private_dump["model"]["apiKey"], "**********")
 		self.assertEqual(len(resolved.configuration_fingerprint), 64)
 
-	def test_external_runtime_rejects_openai_codex_without_reading_credentials(self):
-		resolved_agent = SimpleNamespace(model=SimpleNamespace(provider_type="openai_codex"))
+	def test_external_runtime_returns_non_secret_codex_descriptor(self):
+		resolved_agent = SimpleNamespace(
+			key="codex-agent",
+			name="Codex Agent",
+			prompt="Keep credentials private.",
+			skills=(),
+			timeout=120.0,
+			retries=2,
+			model=SimpleNamespace(
+				provider_type="openai_codex",
+				provider_account="codex-provider-account",
+				model_id="gpt-codex-test",
+				settings={"openai_store": True, "temperature": 0.2},
+			),
+		)
+		account = SimpleNamespace(
+			name="codex-provider-account",
+			disabled=0,
+			oauth_status="Connected",
+			connected_user="codex-user@example.test",
+			external_account_id="account-123",
+		)
 
 		with (
 			patch("afaa.ai.external_runtime.resolve_ai_agent", return_value=resolved_agent),
-			patch("afaa.ai.external_runtime.frappe.get_doc") as get_doc,
-			self.assertRaisesRegex(
-				frappe.ValidationError, "openai_codex.*not supported by external runtimes"
-			),
+			patch("afaa.ai.external_runtime.frappe.get_doc", return_value=account),
 		):
-			resolve_external_runtime("codex-agent")
+			resolved = resolve_external_runtime("codex-agent")
 
-		get_doc.assert_not_called()
+		self.assertIsInstance(resolved, CodexExternalRuntimeConfig)
+		self.assertEqual(resolved.model.provider_account, "codex-provider-account")
+		self.assertEqual(resolved.model.account_id, "account-123")
+		self.assertFalse(resolved.model.settings["openai_store"])
+		payload = resolved.model_dump(mode="json", by_alias=True)
+		self.assertNotIn("access", repr(payload).lower())
+		self.assertNotIn("refresh", repr(payload).lower())
+		self.assertNotIn("apiKey", repr(payload))
+
+	def test_provider_account_invalidation_hooks_are_best_effort_and_sanitized(self):
+		successful_hook = Mock()
+
+		def resolve_hook(path):
+			if path == "broken.hook":
+				raise RuntimeError("credential-bearing callback detail")
+			return successful_hook
+
+		with (
+			patch("afaa.ai.external_runtime.frappe.get_hooks", return_value=["broken.hook", "ok.hook"]),
+			patch("afaa.ai.external_runtime.frappe.get_attr", side_effect=resolve_hook),
+			patch("afaa.ai.external_runtime.frappe.log_error") as log_error,
+		):
+			notify_provider_account_invalidated("codex-provider-account")
+
+		successful_hook.assert_called_once_with("codex-provider-account")
+		self.assertNotIn("credential-bearing callback detail", repr(log_error.call_args))
 
 	def test_skill_cannot_escalate_tool_access(self):
 		tool_key = self.create_tool()
