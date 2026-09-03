@@ -12,5 +12,6 @@ class TestAIProvider(AFAATestSuite):
 	def test_installed_provider_types_are_available(self):
 		providers = {item["value"] for item in get_available_provider_types()}
 		self.assertIn("openai", providers)
+		self.assertIn("openai_codex", providers)
 		self.assertIn("google", providers)
 		self.assertNotIn("anthropic", providers)

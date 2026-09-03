@@ -10,9 +10,19 @@
   "disabled",
   "account_name",
   "provider",
+  "authentication_method",
   "credentials_section",
   "api_key",
+  "connected_app",
   "credentials_column",
+  "oauth_status",
+  "connected_user",
+  "oauth_identity_section",
+  "external_account_id",
+  "external_account_email",
+  "oauth_identity_column",
+  "subscription_plan",
+  "oauth_connected_on",
   "advanced_section",
   "account_settings"
  ],
@@ -67,12 +77,77 @@
    "fieldname": "account_settings",
    "fieldtype": "JSON",
    "label": "Account Settings"
+  },
+  {
+   "default": "API Key",
+   "fieldname": "authentication_method",
+   "fieldtype": "Select",
+   "label": "Authentication Method",
+   "options": "API Key\nOAuth Subscription",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "connected_app",
+   "fieldtype": "Link",
+   "label": "Connected App",
+   "options": "Connected App",
+   "read_only": 1
+  },
+  {
+   "default": "Not Connected",
+   "fieldname": "oauth_status",
+   "fieldtype": "Select",
+   "label": "OAuth Status",
+   "options": "Not Connected\nConnected\nExpired\nError",
+   "read_only": 1
+  },
+  {
+   "fieldname": "connected_user",
+   "fieldtype": "Link",
+   "label": "Connected User",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "oauth_identity_section",
+   "fieldtype": "Section Break",
+   "label": "Subscription Identity"
+  },
+  {
+   "fieldname": "external_account_id",
+   "fieldtype": "Data",
+   "label": "External Account ID",
+   "read_only": 1
+  },
+  {
+   "fieldname": "external_account_email",
+   "fieldtype": "Data",
+   "label": "External Account Email",
+   "read_only": 1
+  },
+  {
+   "fieldname": "oauth_identity_column",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "subscription_plan",
+   "fieldtype": "Data",
+   "label": "Subscription Plan",
+   "read_only": 1
+  },
+  {
+   "fieldname": "oauth_connected_on",
+   "fieldtype": "Datetime",
+   "label": "OAuth Connected On",
+   "read_only": 1
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-08-23 13:54:29.652433",
+ "modified": "2026-09-03 10:34:42.350292",
  "modified_by": "Administrator",
  "module": "AFAA Setup",
  "name": "AI Provider Account",
