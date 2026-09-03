@@ -1,0 +1,21 @@
+{
+ "app": "afaa",
+ "creation": "2026-08-22 12:28:47.275707",
+ "docstatus": 0,
+ "doctype": "Desktop Icon",
+ "hidden": 0,
+ "icon": "brain-circuit",
+ "icon_type": "Link",
+ "idx": 15,
+ "label": "AFAA",
+ "link_to": "AFAA",
+ "link_type": "Workspace Sidebar",
+ "logo_url": "/assets/afaa/images/afaa_icon.svg",
+ "modified": "2026-08-22 13:19:00.000000",
+ "modified_by": "Administrator",
+ "name": "AFAA",
+ "owner": "Administrator",
+ "restrict_removal": 0,
+ "roles": [],
+ "standard": 1
+}

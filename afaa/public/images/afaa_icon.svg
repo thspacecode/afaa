@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1254 1254" role="img" aria-labelledby="title">
+  <title id="title">AFAA coding assistant</title>
+
+  <rect width="1254" height="1254" rx="188" fill="#234b87"/>
+
+  <g fill="#229255">
+    <!-- Antenna -->
+    <rect x="598" y="313" width="57" height="144"/>
+    <circle cx="627" cy="289" r="62"/>
+
+    <!-- Side panels -->
+    <rect x="185" y="620" width="158" height="174" rx="67"/>
+    <rect x="911" y="620" width="158" height="174" rx="67"/>
+
+    <!-- Display frame -->
+    <rect x="304.5" y="457.5" width="645" height="495" rx="121" fill="none" stroke="#229255" stroke-width="77"/>
+
+    <!-- Code brackets -->
+    <path d="M579 606h-79l-79 94 79 96h79l-80-96z"/>
+    <path d="M675 606h79l79 94-79 96h-79l80-96z"/>
+  </g>
+</svg>

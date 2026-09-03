@@ -1,0 +1,177 @@
+{
+ "actions": [],
+ "allow_bulk_edit": 1,
+ "autoname": "field:task_key",
+ "creation": "2026-08-22 14:41:40.900912",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "details_tab",
+  "disabled_section",
+  "disabled",
+  "identity_section",
+  "task_name",
+  "identity_column",
+  "task_key",
+  "description_section",
+  "description",
+  "instructions_section",
+  "instructions",
+  "behavior_tab",
+  "behavior_section",
+  "allow_soft_failure",
+  "expected_output_section",
+  "expected_output",
+  "required_tools_tab",
+  "tools_section",
+  "required_tools"
+ ],
+ "fields": [
+  {
+   "fieldname": "task_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Task Name",
+   "reqd": 1
+  },
+  {
+   "description": "Stable routing key, using lowercase letters, numbers, underscores, or hyphens.",
+   "fieldname": "task_key",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Task Key",
+   "reqd": 1,
+   "show_description_on_click": 1,
+   "unique": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "disabled",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Disabled"
+  },
+  {
+   "fieldname": "description",
+   "fieldtype": "Small Text",
+   "label": "Description",
+   "reqd": 1
+  },
+  {
+   "fieldname": "instructions_section",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "instructions",
+   "fieldtype": "Code",
+   "label": "Instructions",
+   "options": "Jinja",
+   "reqd": 1
+  },
+  {
+   "fieldname": "expected_output_section",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "expected_output",
+   "fieldtype": "Table",
+   "label": "Expected Output",
+   "options": "AI Task Output Field",
+   "reqd": 1
+  },
+  {
+   "default": "0",
+   "description": "Move recoverable execution failures to Blocked so a user can add information and retry.",
+   "fieldname": "allow_soft_failure",
+   "fieldtype": "Check",
+   "label": "Allow Soft Failure"
+  },
+  {
+   "fieldname": "disabled_section",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "identity_section",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "identity_column",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "description_section",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "behavior_section",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "details_tab",
+   "fieldtype": "Tab Break",
+   "label": "Details"
+  },
+  {
+   "fieldname": "behavior_tab",
+   "fieldtype": "Tab Break",
+   "label": "Behavior"
+  },
+  {
+   "fieldname": "required_tools_tab",
+   "fieldtype": "Tab Break",
+   "label": "Required Tools"
+  },
+  {
+   "fieldname": "tools_section",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "required_tools",
+   "fieldtype": "Table",
+   "label": "Required Tools",
+   "options": "AI Task Tool"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-08-22 19:14:18.823118",
+ "modified_by": "Administrator",
+ "module": "AFAA Setup",
+ "name": "AI Task Definition",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "AI Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "rows_threshold_for_grid_search": 20,
+ "search_fields": "task_key,task_name",
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "task_name",
+ "track_changes": 1
+}

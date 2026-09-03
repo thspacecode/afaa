@@ -1,1 +1,2 @@
-AFAA
+AFAA Setup
+AFAA Execution
