@@ -10,13 +10,14 @@ from frappe import _
 
 from afaa.ai.provider.base_provider import BaseProvider
 from afaa.ai.provider.google_provider import GoogleProvider
+from afaa.ai.provider.openai_codex_provider import OpenAICodexProvider
 from afaa.ai.provider.openai_provider import OpenAIProvider
 
 if TYPE_CHECKING:
 	from afaa.afaa_setup.doctype.ai_model.ai_model import AIModel
 	from afaa.afaa_setup.doctype.ai_provider_account.ai_provider_account import AIProviderAccount
 
-BUILTIN_PROVIDERS = (OpenAIProvider, GoogleProvider)
+BUILTIN_PROVIDERS = (OpenAIProvider, OpenAICodexProvider, GoogleProvider)
 
 
 def is_distribution_installed(distribution: str) -> bool:
@@ -33,7 +34,7 @@ def is_provider_available(provider_class: type[BaseProvider]) -> bool:
 		return all(
 			is_distribution_installed(distribution) for distribution in provider_class.required_distributions
 		)
-	except (AttributeError, ImportError, ModuleNotFoundError, TypeError):
+	except AttributeError, ImportError, ModuleNotFoundError, TypeError:
 		return False
 
 
@@ -85,6 +86,8 @@ def get_available_provider_types() -> list[dict[str, Any]]:
 			"label": provider_class.label,
 			"source_app": _get_source_app(provider_class),
 			"required_distributions": list(provider_class.required_distributions),
+			"supported_auth_methods": list(provider_class.supported_auth_methods),
+			"supports_oauth_connection": provider_class.supports_oauth_connection,
 		}
 		for provider_class in get_provider_classes(available_only=True).values()
 	]
@@ -132,12 +135,20 @@ def build_model(model_doc: "AIModel", provider_account_doc: "AIProviderAccount |
 			)
 		)
 	provider = get_provider_class(provider_doc.provider_type)(provider_account_doc)
+	if not provider.is_authenticated():
+		frappe.throw(
+			_("AI Provider Account {0} is not authenticated.").format(frappe.bold(provider_account_doc.name))
+		)
 	return provider.build_model(model_doc)
 
 
 def list_provider_models(provider_account_doc: "AIProviderAccount") -> list[str]:
 	provider_doc = frappe.get_doc("AI Provider", provider_account_doc.provider)
 	provider = get_provider_class(provider_doc.provider_type)(provider_account_doc)
+	if not provider.is_authenticated():
+		frappe.throw(
+			_("AI Provider Account {0} is not authenticated.").format(frappe.bold(provider_account_doc.name))
+		)
 	model_ids = provider.list_models()
 	return sorted(
 		{str(model_id).strip() for model_id in model_ids if model_id is not None and str(model_id).strip()}
@@ -147,6 +158,8 @@ def list_provider_models(provider_account_doc: "AIProviderAccount") -> list[str]
 def sync_provider_models(provider_account_doc: "AIProviderAccount") -> dict[str, list[str]]:
 	model_ids = list_provider_models(provider_account_doc)
 	available_model_ids = set(model_ids)
+	provider_doc = frappe.get_doc("AI Provider", provider_account_doc.provider)
+	provider_class = get_provider_class(provider_doc.provider_type)
 	existing = {
 		row.model_id: row.name
 		for row in frappe.get_all(
@@ -157,15 +170,16 @@ def sync_provider_models(provider_account_doc: "AIProviderAccount") -> dict[str,
 	}
 	report = {"created": [], "updated": [], "unavailable": []}
 
-	for model_id, name in existing.items():
-		if model_id not in available_model_ids:
-			frappe.db.set_value(
-				"AI Model",
-				name,
-				{"available": 0, "disabled": 1},
-				update_modified=False,
-			)
-			report["unavailable"].append(model_id)
+	if not provider_class.model_catalog_is_account_specific:
+		for model_id, name in existing.items():
+			if model_id not in available_model_ids:
+				frappe.db.set_value(
+					"AI Model",
+					name,
+					{"available": 0, "disabled": 1},
+					update_modified=False,
+				)
+				report["unavailable"].append(model_id)
 
 	for model_id in model_ids:
 		if name := existing.get(model_id):
@@ -195,6 +209,8 @@ def as_public_dict(provider_class: type[BaseProvider]) -> dict[str, Any]:
 		"required_distributions": list(provider_class.required_distributions),
 		"source_app": _get_source_app(provider_class),
 		"available": is_provider_available(provider_class),
+		"supported_auth_methods": list(provider_class.supported_auth_methods),
+		"supports_oauth_connection": provider_class.supports_oauth_connection,
 	}
 
 

@@ -1,6 +1,9 @@
 # Copyright (c) 2026, SpaceCode and Contributors
 # See license.txt
 
+from types import SimpleNamespace
+from unittest.mock import patch
+
 import frappe
 
 from afaa.ai.external_runtime import resolve_external_runtime
@@ -53,6 +56,20 @@ class TestAIAgent(AFAATestSuite):
 		self.assertEqual(public_dump["model"]["apiKey"], "**********")
 		self.assertNotEqual(private_dump["model"]["apiKey"], "**********")
 		self.assertEqual(len(resolved.configuration_fingerprint), 64)
+
+	def test_external_runtime_rejects_openai_codex_without_reading_credentials(self):
+		resolved_agent = SimpleNamespace(model=SimpleNamespace(provider_type="openai_codex"))
+
+		with (
+			patch("afaa.ai.external_runtime.resolve_ai_agent", return_value=resolved_agent),
+			patch("afaa.ai.external_runtime.frappe.get_doc") as get_doc,
+			self.assertRaisesRegex(
+				frappe.ValidationError, "openai_codex.*not supported by external runtimes"
+			),
+		):
+			resolve_external_runtime("codex-agent")
+
+		get_doc.assert_not_called()
 
 	def test_skill_cannot_escalate_tool_access(self):
 		tool_key = self.create_tool()

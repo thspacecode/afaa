@@ -100,7 +100,7 @@ def resolve_ai_agent(agent_name: str, context=None, *, require_enabled: bool = T
 		if not model.available:
 			frappe.throw(_("AI Model {0} is unavailable.").format(frappe.bold(model.name)))
 
-	get_provider_class(provider.provider_type)
+	provider_adapter = get_provider_class(provider.provider_type)(provider_account)
 
 	allowed_tool_names = {row.tool for row in agent.allowed_tools}
 	tools = tuple(_resolve_tool(name, require_enabled=require_enabled) for name in sorted(allowed_tool_names))
@@ -169,6 +169,7 @@ def resolve_ai_agent(agent_name: str, context=None, *, require_enabled: bool = T
 		settings.setdefault("temperature", agent.temperature)
 	if agent.max_tokens:
 		settings.setdefault("max_tokens", agent.max_tokens)
+	settings = provider_adapter.prepare_model_settings(settings)
 
 	return ResolvedAIAgent(
 		key=agent.agent_key,
