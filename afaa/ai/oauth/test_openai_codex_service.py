@@ -3,13 +3,16 @@
 
 import base64
 import json
+import os
 import uuid
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import frappe
 
 from afaa.afaa_setup.patches.provision_openai_codex_connected_app import execute as provision_connected_app
 from afaa.ai.oauth.openai_codex import (
+	CONNECTED_APP_NAME,
 	AuthorizationGrant,
 	CodexOAuthError,
 	CodexOAuthSlowDown,
@@ -19,7 +22,13 @@ from afaa.ai.oauth.openai_codex import (
 from afaa.ai.oauth.openai_codex_service import (
 	FLOW_KEY_PREFIX,
 	CodexAuthenticationError,
+	CodexReconnectRequiredError,
+	CodexTemporaryRefreshError,
+	CodexTokenResult,
+	CodexUsageLimitError,
+	CodexWorkspaceAuthorizationError,
 	_persist_token_cache,
+	report_codex_authentication_failure,
 	resolve_codex_access_token,
 )
 from afaa.tests.utils import AFAATestSuite
@@ -87,7 +96,18 @@ class TestOpenAICodexOAuthService(AFAATestSuite):
 	def tearDown(self):
 		for flow_id in self.flow_ids:
 			frappe.cache.delete_value(FLOW_KEY_PREFIX + flow_id)
+		# Token refresh commits while holding its cross-process lock. Roll back first,
+		# then remove any test records made durable by a refresh.
+		frappe.db.rollback()
 		self.user_context.__exit__(None, None, None)
+		token_cache = frappe.get_doc("Connected App", CONNECTED_APP_NAME).get_token_cache(self.user)
+		if token_cache:
+			token_cache.delete(ignore_permissions=True, force=True)
+		if frappe.db.exists("AI Provider Account", self.account.name):
+			frappe.delete_doc("AI Provider Account", self.account.name, ignore_permissions=True, force=True)
+		if frappe.db.exists("User", self.user):
+			frappe.delete_doc("User", self.user, ignore_permissions=True, force=True)
+		frappe.db.commit()
 		super().tearDown()
 
 	def test_device_authorization_maps_account_permission_error(self):
@@ -212,7 +232,100 @@ class TestOpenAICodexOAuthService(AFAATestSuite):
 			frappe.get_doc("Connected App", self.account.connected_app).get_token_cache(frappe.session.user)
 		)
 
-	def test_proactive_refresh_persists_rotation_and_rechecks_after_lock(self):
+	def test_proactive_refresh_enforces_minimum_validity_and_rechecks_after_lock(self):
+		token_cache = frappe.get_doc(
+			{
+				"doctype": "Token Cache",
+				"connected_app": self.account.connected_app,
+				"user": frappe.session.user,
+			}
+		)
+		_persist_token_cache(token_cache, OAuthTokens("old-access", "old-refresh", None, 200))
+		self.account.db_set(
+			{
+				"oauth_status": "Connected",
+				"connected_user": frappe.session.user,
+				"external_account_id": "account-123",
+			}
+		)
+
+		client = FakeOAuthClient()
+		with patch("afaa.ai.oauth.openai_codex_service.get_codex_oauth_client", return_value=client):
+			first = resolve_codex_access_token(self.account, minimum_validity=0)
+			second = resolve_codex_access_token(self.account)
+
+		self.assertIsInstance(first, CodexTokenResult)
+		self.assertEqual(first.access_token.get_secret_value(), "new-access")
+		self.assertEqual(second.access_token.get_secret_value(), "new-access")
+		self.assertGreater(first.expires_at, int(__import__("time").time()) + 3500)
+		self.assertNotIn("new-access", repr(first))
+		self.assertEqual(client.refresh_calls, 1)
+		token_cache.reload()
+		self.assertEqual(token_cache.get_password("refresh_token"), "new-refresh")
+
+	def test_forced_refresh_rotates_token_even_when_cached_token_is_valid(self):
+		token_cache = frappe.get_doc(
+			{
+				"doctype": "Token Cache",
+				"connected_app": self.account.connected_app,
+				"user": frappe.session.user,
+			}
+		)
+		_persist_token_cache(token_cache, OAuthTokens("old-access", "old-refresh", None, 3600))
+		self.account.db_set(
+			{
+				"oauth_status": "Connected",
+				"connected_user": frappe.session.user,
+				"external_account_id": "account-123",
+			}
+		)
+		client = FakeOAuthClient()
+
+		with patch("afaa.ai.oauth.openai_codex_service.get_codex_oauth_client", return_value=client):
+			result = resolve_codex_access_token(self.account, minimum_validity=0, force_refresh=True)
+
+		self.assertEqual(result.access_token.get_secret_value(), "new-access")
+		self.assertEqual(client.refresh_calls, 1)
+		token_cache.reload()
+		self.assertEqual(token_cache.get_password("refresh_token"), "new-refresh")
+
+	def test_forced_waiter_reuses_token_rotated_by_another_waiter(self):
+		now = frappe.utils.now_datetime()
+		token_cache = SimpleNamespace(
+			name="codex-token-cache",
+			modified=now,
+			expires_in=3600,
+			reload=Mock(),
+			get_expires_in=Mock(return_value=3600),
+			get_password=Mock(return_value="rotated-access"),
+		)
+		account = SimpleNamespace(
+			name="codex-account",
+			disabled=0,
+			oauth_status="Connected",
+			connected_user="codex-user",
+			reload=Mock(),
+		)
+
+		class ConcurrentRotation:
+			def __enter__(self):
+				token_cache.modified = frappe.utils.add_to_date(now, seconds=1)
+
+			def __exit__(self, *args):
+				return False
+
+		with (
+			patch("afaa.ai.oauth.openai_codex_service._validate_codex_account"),
+			patch("afaa.ai.oauth.openai_codex_service._get_token_cache", return_value=token_cache),
+			patch("afaa.ai.oauth.openai_codex_service.filelock", return_value=ConcurrentRotation()),
+			patch("afaa.ai.oauth.openai_codex_service.get_codex_oauth_client") as oauth_client,
+		):
+			result = resolve_codex_access_token(account, force_refresh=True)
+
+		self.assertEqual(result.access_token.get_secret_value(), "rotated-access")
+		oauth_client.assert_not_called()
+
+	def test_refresh_errors_have_sanitized_categories(self):
 		token_cache = frappe.get_doc(
 			{
 				"doctype": "Token Cache",
@@ -229,16 +342,22 @@ class TestOpenAICodexOAuthService(AFAATestSuite):
 			}
 		)
 
-		client = FakeOAuthClient()
-		with patch("afaa.ai.oauth.openai_codex_service.get_codex_oauth_client", return_value=client):
-			first = resolve_codex_access_token(self.account)
-			second = resolve_codex_access_token(self.account)
-
-		self.assertEqual(first, "new-access")
-		self.assertEqual(second, "new-access")
-		self.assertEqual(client.refresh_calls, 1)
-		token_cache.reload()
-		self.assertEqual(token_cache.get_password("refresh_token"), "new-refresh")
+		cases = (
+			(403, CodexWorkspaceAuthorizationError, "workspace_authorization"),
+			(429, CodexUsageLimitError, "usage_limit"),
+			(503, CodexTemporaryRefreshError, "temporary_refresh_failure"),
+		)
+		for status_code, error_type, category in cases:
+			self.account.db_set("oauth_status", "Connected")
+			client = FakeOAuthClient()
+			client.refresh_result = CodexOAuthError("token refresh", status_code)
+			with (
+				self.subTest(status_code=status_code),
+				patch("afaa.ai.oauth.openai_codex_service.get_codex_oauth_client", return_value=client),
+				self.assertRaises(error_type) as raised,
+			):
+				resolve_codex_access_token(self.account)
+			self.assertEqual(raised.exception.category, category)
 
 	def test_disconnect_deletes_local_credentials_when_revocation_fails(self):
 		token_cache = frappe.get_doc(
@@ -262,6 +381,7 @@ class TestOpenAICodexOAuthService(AFAATestSuite):
 		with (
 			patch("afaa.ai.oauth.openai_codex_service.get_codex_oauth_client", return_value=client),
 			patch("afaa.ai.oauth.openai_codex_service.frappe.log_error") as log_error,
+			patch("afaa.ai.external_runtime.notify_provider_account_invalidated") as invalidated,
 		):
 			result = self.account.disconnect_oauth()
 
@@ -271,6 +391,21 @@ class TestOpenAICodexOAuthService(AFAATestSuite):
 		self.assertEqual(self.account.oauth_status, "Not Connected")
 		self.assertFalse(self.account.connected_user)
 		self.assertNotIn("old-refresh", repr(log_error.call_args))
+		invalidated.assert_called_once_with(self.account.name)
+
+	def test_missing_oauth_token_never_falls_back_to_environment_api_key(self):
+		self.account.db_set(
+			{
+				"oauth_status": "Connected",
+				"connected_user": frappe.session.user,
+				"external_account_id": "account-123",
+			}
+		)
+		with (
+			patch.dict(os.environ, {"OPENAI_API_KEY": "must-not-be-used"}),
+			self.assertRaises(CodexReconnectRequiredError),
+		):
+			resolve_codex_access_token(self.account)
 
 	def test_guest_cannot_start_oauth(self):
 		with self.set_user("Guest"):
@@ -320,9 +455,20 @@ class TestOpenAICodexRefreshFailure(AFAATestSuite):
 		client.refresh_result = CodexOAuthError("token refresh", 401)
 
 		try:
-			with patch("afaa.ai.oauth.openai_codex_service.get_codex_oauth_client", return_value=client):
-				with self.assertRaisesRegex(CodexAuthenticationError, "reconnect account"):
+			with (
+				patch("afaa.ai.oauth.openai_codex_service.get_codex_oauth_client", return_value=client),
+				patch("afaa.ai.external_runtime.notify_provider_account_invalidated") as invalidated,
+			):
+				with self.assertRaisesRegex(CodexReconnectRequiredError, "reconnect account"):
 					resolve_codex_access_token(account)
+			account.reload()
+			self.assertEqual(account.oauth_status, "Expired")
+			invalidated.assert_called_once_with(account.name)
+
+			account.db_set("oauth_status", "Connected")
+			with patch("afaa.ai.external_runtime.notify_provider_account_invalidated") as invalidated:
+				report_codex_authentication_failure(account)
+			invalidated.assert_called_once_with(account.name)
 			account.reload()
 			self.assertEqual(account.oauth_status, "Expired")
 		finally:

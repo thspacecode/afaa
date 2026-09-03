@@ -49,7 +49,23 @@ class IntegrationTestOpenAICodexSubscription(AFAATestSuite):
 	def tearDown(self):
 		if self.flow_id:
 			frappe.cache.delete_value(FLOW_KEY_PREFIX + self.flow_id)
+		# A serialized refresh commits its Token Cache rotation before releasing the
+		# lock, so explicitly remove any test records made durable by that commit.
+		frappe.db.rollback()
 		self.user_context.__exit__(None, None, None)
+		token_cache = frappe.get_doc("Connected App", CONNECTED_APP_NAME).get_token_cache(self.user)
+		if token_cache:
+			token_cache.delete(ignore_permissions=True, force=True)
+		model_name = frappe.db.get_value(
+			"AI Model", {"provider": "openai_codex", "model_id": "codex-integration-model"}
+		)
+		if model_name:
+			frappe.delete_doc("AI Model", model_name, ignore_permissions=True, force=True)
+		if frappe.db.exists("AI Provider Account", self.account.name):
+			frappe.delete_doc("AI Provider Account", self.account.name, ignore_permissions=True, force=True)
+		if frappe.db.exists("User", self.user):
+			frappe.delete_doc("User", self.user, ignore_permissions=True, force=True)
+		frappe.db.commit()
 		super().tearDown()
 
 	def test_connect_sync_build_refresh_and_disconnect(self):

@@ -1,7 +1,7 @@
 # Copyright (c) 2026, SpaceCode and contributors
 # For license information, please see license.txt
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import frappe
 import requests
@@ -11,6 +11,9 @@ from frappe.model.document import Document
 from afaa import __version__
 from afaa.ai.oauth.openai_codex import CONNECTED_APP_NAME
 from afaa.ai.provider.base_provider import BaseProvider
+
+if TYPE_CHECKING:
+	from afaa.ai.oauth.openai_codex_service import CodexTokenResult
 
 CODEX_BASE_URL = "https://chatgpt.com/backend-api/codex"
 CODEX_CLIENT_VERSION = __version__
@@ -49,10 +52,20 @@ class OpenAICodexProvider(BaseProvider):
 			return "Expired"
 		return status
 
-	def resolve_access_token(self) -> str:
+	def resolve_access_token_result(
+		self, minimum_validity: int = 300, *, force_refresh: bool = False
+	) -> "CodexTokenResult":
+		"""Return the typed token interface used by trusted credential brokers."""
 		from afaa.ai.oauth.openai_codex import resolve_codex_access_token
 
-		return resolve_codex_access_token(self.provider_account_doc)
+		return resolve_codex_access_token(
+			self.provider_account_doc,
+			minimum_validity,
+			force_refresh=force_refresh,
+		)
+
+	def resolve_access_token(self) -> str:
+		return self.resolve_access_token_result().access_token.get_secret_value()
 
 	def disconnect(self) -> None:
 		from afaa.ai.oauth.openai_codex import disconnect_oauth
@@ -144,6 +157,6 @@ class OpenAICodexProvider(BaseProvider):
 		return account_id
 
 	def mark_authentication_expired(self) -> None:
-		if self.provider_account_doc.oauth_status == "Expired":
-			return
-		self.provider_account_doc.db_set("oauth_status", "Expired", notify=True, commit=True)
+		from afaa.ai.oauth.openai_codex import report_codex_authentication_failure
+
+		report_codex_authentication_failure(self.provider_account_doc)

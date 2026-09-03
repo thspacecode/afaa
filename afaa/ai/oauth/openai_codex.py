@@ -12,9 +12,12 @@ import binascii
 import json
 from dataclasses import dataclass
 from dataclasses import field as dataclass_field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import requests
+
+if TYPE_CHECKING:
+	from afaa.ai.oauth.openai_codex_service import CodexTokenResult
 
 CONNECTED_APP_NAME = "AFAA OpenAI Codex"
 DEFAULT_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
@@ -316,10 +319,18 @@ def poll_oauth_login(account, flow_id: str) -> dict:
 	return poll(account, flow_id)
 
 
-def resolve_codex_access_token(account, minimum_validity: int = 300) -> str:
+def resolve_codex_access_token(
+	account, minimum_validity: int = 300, *, force_refresh: bool = False
+) -> "CodexTokenResult":
 	from afaa.ai.oauth.openai_codex_service import resolve_codex_access_token as resolve
 
-	return resolve(account, minimum_validity)
+	return resolve(account, minimum_validity, force_refresh=force_refresh)
+
+
+def report_codex_authentication_failure(account) -> None:
+	from afaa.ai.oauth.openai_codex_service import report_codex_authentication_failure as report
+
+	report(account)
 
 
 def disconnect_oauth(account) -> None:

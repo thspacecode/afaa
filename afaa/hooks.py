@@ -101,8 +101,9 @@ export_python_type_annotations = True
 # before_install = "afaa.install.before_install"
 # after_install = "afaa.install.after_install"
 
-# Extension hook for provider apps:
+# Extension hooks for provider and credential-broker apps:
 # afaa_ai_providers = ["another_app.ai.providers.CustomProvider"]
+# afaa_provider_account_invalidated = ["another_app.credentials.invalidate_provider_account"]
 
 # Uninstallation
 # ------------
