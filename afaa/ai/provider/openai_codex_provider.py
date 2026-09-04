@@ -8,7 +8,6 @@ import requests
 from frappe import _
 from frappe.model.document import Document
 
-from afaa import __version__
 from afaa.ai.oauth.openai_codex import CONNECTED_APP_NAME
 from afaa.ai.provider.base_provider import BaseProvider
 
@@ -16,7 +15,8 @@ if TYPE_CHECKING:
 	from afaa.ai.oauth.openai_codex_service import CodexTokenResult
 
 CODEX_BASE_URL = "https://chatgpt.com/backend-api/codex"
-CODEX_CLIENT_VERSION = __version__
+# The catalog expects a compatible Codex CLI version, not the AFAA package version.
+CODEX_CLIENT_VERSION = "0.153.2"
 
 
 class OpenAICodexProvider(BaseProvider):
