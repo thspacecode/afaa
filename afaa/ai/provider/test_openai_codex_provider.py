@@ -12,11 +12,7 @@ from pydantic_ai.models import ModelRequestParameters
 from pydantic_ai.models.openai import OpenAIResponsesModel
 
 from afaa.ai.provider import sync_provider_models
-from afaa.ai.provider.openai_codex_provider import (
-	CODEX_BASE_URL,
-	CODEX_CLIENT_VERSION,
-	OpenAICodexProvider,
-)
+from afaa.ai.provider.openai_codex_provider import CODEX_BASE_URL, OpenAICodexProvider
 from afaa.ai.provider.openai_codex_transport import (
 	CodexProviderError,
 	raise_codex_provider_error,
@@ -139,7 +135,7 @@ class TestOpenAICodexProvider(TestCase):
 		self.assertEqual(models, ["gpt-codex-visible"])
 		get.assert_called_once_with(
 			f"{CODEX_BASE_URL}/models",
-			params={"client_version": CODEX_CLIENT_VERSION},
+			params={"client_version": "0.153.2"},
 			headers={
 				"Authorization": "Bearer oauth-access-token",
 				"chatgpt-account-id": "account-123",
