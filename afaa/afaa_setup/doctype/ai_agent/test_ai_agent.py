@@ -67,6 +67,7 @@ class TestAIAgent(AFAATestSuite):
 			name="Codex Agent",
 			prompt="Keep credentials private.",
 			skills=(),
+			tools=(),
 			timeout=120.0,
 			retries=2,
 			model=SimpleNamespace(

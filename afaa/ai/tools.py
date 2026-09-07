@@ -12,6 +12,14 @@ import frappe
 from frappe import _
 from pydantic import BaseModel
 
+EXTERNAL_READ_TOOL_METHODS = {
+	"frappe_get_doctype_schema": "afaa.tools.fetch.frappe_get_doctype_schema",
+	"frappe_get_list": "afaa.tools.fetch.frappe_get_list",
+	"frappe_get_doc": "afaa.tools.fetch.frappe_get_doc",
+	"frappe_get_count": "afaa.tools.fetch.frappe_get_count",
+}
+EXTERNAL_READ_TOOL_KEYS = frozenset(EXTERNAL_READ_TOOL_METHODS)
+
 
 @dataclass(frozen=True)
 class ToolDefinition:
