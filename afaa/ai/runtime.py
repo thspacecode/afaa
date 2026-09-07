@@ -38,6 +38,7 @@ class ResolvedSkill(BaseModel):
 
 	key: str
 	name: str
+	description: str | None
 	instructions: str
 	required_tools: tuple[str, ...]
 
@@ -159,6 +160,7 @@ def resolve_ai_agent(agent_name: str, context=None, *, require_enabled: bool = T
 			ResolvedSkill(
 				key=skill.skill_key,
 				name=skill.skill_name,
+				description=skill.description or None,
 				instructions=skill.instructions,
 				required_tools=required_tools,
 			)

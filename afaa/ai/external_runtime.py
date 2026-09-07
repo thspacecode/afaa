@@ -9,9 +9,48 @@ from typing import Any, Literal
 
 import frappe
 from frappe import _
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 
 from afaa.ai.runtime import resolve_ai_agent
+from afaa.ai.tools import EXTERNAL_READ_TOOL_METHODS, get_tool_definition
+
+
+class ExternalRuntimeSkill(BaseModel):
+	"""Credential-free skill capability data safe to pin on an external thread."""
+
+	model_config = ConfigDict(frozen=True, extra="forbid", populate_by_name=True)
+
+	key: str = Field(pattern=r"^[a-z0-9][a-z0-9_-]{0,139}$")
+	name: str = Field(min_length=1, max_length=140)
+	description: str | None = None
+	instructions: str = Field(min_length=1)
+	required_tools: tuple[str, ...] = Field(alias="requiredTools", max_length=100)
+	fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+	@model_validator(mode="after")
+	def validate_fingerprint(self) -> ExternalRuntimeSkill:
+		expected = external_skill_fingerprint(
+			key=self.key,
+			name=self.name,
+			description=self.description,
+			instructions=self.instructions,
+			required_tools=self.required_tools,
+		)
+		if self.fingerprint != expected:
+			raise ValueError("skill fingerprint does not match its content")
+		return self
+
+
+class ExternalRuntimeTool(BaseModel):
+	"""Public schema for one approved tool; the registered Python method is intentionally omitted."""
+
+	model_config = ConfigDict(frozen=True, extra="forbid", populate_by_name=True)
+
+	key: str = Field(pattern=r"^[a-z0-9][a-z0-9_-]{0,139}$")
+	name: str = Field(min_length=1, max_length=140)
+	description: str = Field(min_length=1)
+	input_schema: dict[str, Any] = Field(alias="inputSchema")
+	output_schema: dict[str, Any] = Field(alias="outputSchema")
 
 
 class ExternalRuntimeModel(BaseModel):
@@ -28,7 +67,7 @@ class ExternalRuntimeModel(BaseModel):
 
 
 class ExternalRuntimeConfig(BaseModel):
-	"""Versioned schema-v1 contract consumed by trusted external runtime services."""
+	"""Legacy schema-v1 contract consumed by trusted external runtime services."""
 
 	model_config = ConfigDict(frozen=True, extra="forbid", populate_by_name=True)
 
@@ -44,6 +83,13 @@ class ExternalRuntimeConfig(BaseModel):
 		payload = self.model_dump(mode="json", by_alias=True)
 		payload["model"]["apiKey"] = self.model.api_key.get_secret_value()
 		return payload
+
+
+class StructuredExternalRuntimeConfig(ExternalRuntimeConfig):
+	"""External runtime contract with deferred skills and approved tool schemas."""
+
+	skills: tuple[ExternalRuntimeSkill, ...] = Field(max_length=100)
+	tools: tuple[ExternalRuntimeTool, ...] = Field(max_length=100)
 
 
 class CodexExternalRuntimeModel(BaseModel):
@@ -68,7 +114,7 @@ class CodexExternalRuntimeModel(BaseModel):
 
 
 class CodexExternalRuntimeDescriptor(BaseModel):
-	"""Internal AFAA descriptor from which Porch may issue a leased runtime DTO."""
+	"""Legacy internal AFAA descriptor from which Porch may issue a leased runtime DTO."""
 
 	model_config = ConfigDict(frozen=True, extra="forbid", populate_by_name=True, strict=True)
 
@@ -79,22 +125,55 @@ class CodexExternalRuntimeDescriptor(BaseModel):
 	configuration_fingerprint: str = Field(alias="configurationFingerprint", pattern=r"^[0-9a-f]{64}$")
 
 
-# Compatibility alias for callers that group both return variants as configurations.
+class StructuredCodexExternalRuntimeDescriptor(CodexExternalRuntimeDescriptor):
+	"""Credential-free Codex descriptor with deferred skills and approved tool schemas."""
+
+	model_config = ConfigDict(frozen=True, extra="forbid", populate_by_name=True, strict=True)
+
+	skills: tuple[ExternalRuntimeSkill, ...] = Field(max_length=100)
+	tools: tuple[ExternalRuntimeTool, ...] = Field(max_length=100)
+
+
+# Compatibility aliases for callers that group return variants as configurations.
 CodexExternalRuntimeConfig = CodexExternalRuntimeDescriptor
-ExternalRuntime = ExternalRuntimeConfig | CodexExternalRuntimeDescriptor
+ExternalRuntime = (
+	ExternalRuntimeConfig
+	| StructuredExternalRuntimeConfig
+	| CodexExternalRuntimeDescriptor
+	| StructuredCodexExternalRuntimeDescriptor
+)
 
 
-def resolve_external_runtime(agent_name: str, context=None) -> ExternalRuntime:
-	"""Resolve one enabled AFAA agent for execution outside the Frappe process."""
+def resolve_external_runtime(
+	agent_name: str,
+	context=None,
+	*,
+	legacy_skill_instructions: bool = False,
+) -> ExternalRuntime:
+	"""Resolve one enabled AFAA agent for execution outside the Frappe process.
+
+	Structured skills are the default. Existing threads may explicitly request the
+	legacy contract, which flattens skill instructions into the agent instructions.
+	"""
 	resolved = resolve_ai_agent(agent_name, context)
-	instructions = tuple(
-		value.strip()
-		for value in (resolved.prompt, *(skill.instructions for skill in resolved.skills))
-		if value and value.strip()
-	)
+	if legacy_skill_instructions:
+		instructions = _non_empty_instructions(
+			resolved.prompt, *(skill.instructions for skill in resolved.skills)
+		)
+		skills: tuple[ExternalRuntimeSkill, ...] = ()
+		tools: tuple[ExternalRuntimeTool, ...] = ()
+	else:
+		instructions = _non_empty_instructions(resolved.prompt)
+		skills, tools = build_structured_runtime_capabilities(resolved)
 
 	if resolved.model.provider_type == "openai_codex":
-		return resolve_codex_external_runtime(resolved, instructions)
+		return resolve_codex_external_runtime(
+			resolved,
+			instructions,
+			skills=skills,
+			tools=tools,
+			legacy_skill_instructions=legacy_skill_instructions,
+		)
 	if resolved.model.provider_type not in {"openai", "google"}:
 		frappe.throw(
 			_("AI provider type {0} is not supported by external runtimes.").format(
@@ -111,20 +190,14 @@ def resolve_external_runtime(agent_name: str, context=None) -> ExternalRuntime:
 			frappe.ValidationError,
 		)
 
-	safe_configuration = {
-		"schemaVersion": 1,
-		"agentId": f"afaa:{resolved.key}",
-		"name": resolved.name,
-		"instructions": instructions,
-		"model": {
-			"providerType": resolved.model.provider_type,
-			"modelId": resolved.model.model_id,
-			"settings": resolved.model.settings,
-			"timeout": resolved.timeout,
-			"retries": resolved.retries,
-		},
-	}
-	return ExternalRuntimeConfig.model_validate(
+	safe_configuration = _base_configuration(resolved, instructions)
+	config_type: type[ExternalRuntimeConfig]
+	if legacy_skill_instructions:
+		config_type = ExternalRuntimeConfig
+	else:
+		safe_configuration.update(_structured_payload(skills, tools))
+		config_type = StructuredExternalRuntimeConfig
+	return config_type.model_validate(
 		{
 			**safe_configuration,
 			"model": {**safe_configuration["model"], "apiKey": api_key},
@@ -133,7 +206,14 @@ def resolve_external_runtime(agent_name: str, context=None) -> ExternalRuntime:
 	)
 
 
-def resolve_codex_external_runtime(resolved, instructions: tuple[str, ...]) -> CodexExternalRuntimeDescriptor:
+def resolve_codex_external_runtime(
+	resolved,
+	instructions: tuple[str, ...],
+	*,
+	skills: tuple[ExternalRuntimeSkill, ...] = (),
+	tools: tuple[ExternalRuntimeTool, ...] = (),
+	legacy_skill_instructions: bool = True,
+) -> CodexExternalRuntimeDescriptor:
 	"""Build a credential-free Codex descriptor without reading Token Cache passwords."""
 	from afaa.ai.oauth.openai_codex_service import CodexReconnectRequiredError
 
@@ -159,7 +239,13 @@ def resolve_codex_external_runtime(resolved, instructions: tuple[str, ...]) -> C
 			"retries": resolved.retries,
 		},
 	}
-	return CodexExternalRuntimeDescriptor.model_validate(
+	config_type: type[CodexExternalRuntimeDescriptor]
+	if legacy_skill_instructions:
+		config_type = CodexExternalRuntimeDescriptor
+	else:
+		safe_configuration.update(_structured_payload(skills, tools))
+		config_type = StructuredCodexExternalRuntimeDescriptor
+	return config_type.model_validate(
 		{
 			**safe_configuration,
 			"configurationFingerprint": configuration_fingerprint(safe_configuration),
@@ -167,7 +253,111 @@ def resolve_codex_external_runtime(resolved, instructions: tuple[str, ...]) -> C
 	)
 
 
+def build_structured_runtime_capabilities(
+	resolved,
+) -> tuple[tuple[ExternalRuntimeSkill, ...], tuple[ExternalRuntimeTool, ...]]:
+	"""Build deterministic skill DTOs and approved tools from one resolved agent."""
+	tools = []
+	for tool in sorted(resolved.tools, key=lambda item: item.key):
+		expected_method = EXTERNAL_READ_TOOL_METHODS.get(tool.key)
+		if not expected_method:
+			continue
+		definition = get_tool_definition(tool.key)
+		if not definition or definition.key != tool.key or definition.method != expected_method:
+			frappe.throw(
+				_("AI Tool {0} is not registered as an approved read-only tool.").format(
+					frappe.bold(tool.key)
+				),
+				frappe.ValidationError,
+			)
+		tools.append(
+			ExternalRuntimeTool(
+				key=definition.key,
+				name=definition.name,
+				description=definition.description,
+				inputSchema=definition.input_schema,
+				outputSchema=definition.output_schema,
+			)
+		)
+
+	external_tool_keys = {tool.key for tool in tools}
+	skills = []
+	for skill in sorted(resolved.skills, key=lambda item: item.key):
+		required_tools = tuple(sorted(set(skill.required_tools)))
+		unsupported = set(required_tools) - external_tool_keys
+		if unsupported:
+			frappe.throw(
+				_("AI Skill {0} requires tools unsupported by external runtimes: {1}").format(
+					frappe.bold(skill.name), ", ".join(sorted(unsupported))
+				),
+				frappe.ValidationError,
+			)
+		snapshot = {
+			"key": skill.key,
+			"name": skill.name,
+			"description": skill.description or None,
+			"instructions": skill.instructions,
+			"requiredTools": required_tools,
+		}
+		skills.append(
+			ExternalRuntimeSkill.model_validate(
+				{**snapshot, "fingerprint": configuration_fingerprint(snapshot)}
+			)
+		)
+	return tuple(skills), tuple(tools)
+
+
+def _base_configuration(resolved, instructions: tuple[str, ...]) -> dict[str, Any]:
+	return {
+		"schemaVersion": 1,
+		"agentId": f"afaa:{resolved.key}",
+		"name": resolved.name,
+		"instructions": instructions,
+		"model": {
+			"providerType": resolved.model.provider_type,
+			"modelId": resolved.model.model_id,
+			"settings": resolved.model.settings,
+			"timeout": resolved.timeout,
+			"retries": resolved.retries,
+		},
+	}
+
+
+def _structured_payload(
+	skills: tuple[ExternalRuntimeSkill, ...], tools: tuple[ExternalRuntimeTool, ...]
+) -> dict[str, Any]:
+	return {
+		"skills": tuple(skill.model_dump(mode="json", by_alias=True) for skill in skills),
+		"tools": tuple(tool.model_dump(mode="json", by_alias=True) for tool in tools),
+	}
+
+
+def _non_empty_instructions(*values: str | None) -> tuple[str, ...]:
+	return tuple(value.strip() for value in values if value and value.strip())
+
+
+def external_skill_fingerprint(
+	*,
+	key: str,
+	name: str,
+	description: str | None,
+	instructions: str,
+	required_tools: tuple[str, ...] | list[str],
+) -> str:
+	"""Hash exactly the immutable fields carried by a pinned skill DTO."""
+	return configuration_fingerprint(
+		{
+			"key": key,
+			"name": name,
+			"description": description,
+			"instructions": instructions,
+			"requiredTools": tuple(required_tools),
+		}
+	)
+
+
 def configuration_fingerprint(configuration: dict[str, Any]) -> str:
+	"""Hash canonical, credential-free runtime configuration."""
 	return hashlib.sha256(
 		json.dumps(configuration, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
 	).hexdigest()

@@ -13,6 +13,7 @@ class TestAISkill(AFAATestSuite):
 		skill = next(item for item in agent.skills if item.key == "frappe-data-reader")
 
 		self.assertEqual(skill.name, "Frappe Data Reader")
+		self.assertEqual(skill.description, "Inspect Frappe metadata and records without changing them.")
 		self.assertIn("frappe_get_doc", skill.required_tools)
 		self.assertTrue(set(skill.required_tools).issubset({tool.key for tool in agent.tools}))
 
