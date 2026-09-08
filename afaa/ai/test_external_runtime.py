@@ -8,6 +8,7 @@ from unittest.mock import patch
 import frappe
 
 from afaa.ai.external_runtime import (
+	BundleExternalRuntimeSkill,
 	ExternalRuntimeConfig,
 	ExternalRuntimeSkill,
 	StructuredExternalRuntimeConfig,
@@ -15,6 +16,7 @@ from afaa.ai.external_runtime import (
 	configuration_fingerprint,
 	resolve_external_runtime,
 )
+from afaa.ai.skill_bundles import EMPTY_BUNDLE_DIGEST, SkillBundleReference
 from afaa.ai.tools import EXTERNAL_READ_TOOL_METHODS
 
 
@@ -97,6 +99,28 @@ class TestStructuredExternalRuntime(TestCase):
 			changed_tool = resolve_external_runtime("reviewer")
 		self.assertNotEqual(first.configuration_fingerprint, changed_tool.configuration_fingerprint)
 		self.assertEqual(first.skills[0].fingerprint, changed_tool.skills[0].fingerprint)
+
+	def test_bundle_aware_contract_pins_reference_and_fingerprints_it(self):
+		resolved = make_resolved_agent()
+		bundle = SkillBundleReference(
+			versionId="1" * 64,
+			digest=EMPTY_BUNDLE_DIGEST,
+			fileCount=0,
+			totalBytes=0,
+		)
+		with (
+			patch(
+				"afaa.ai.external_runtime.get_tool_definition",
+				side_effect=lambda key: make_tool_definition(key),
+			),
+			patch("afaa.ai.skill_bundles.create_skill_bundle_version", return_value=bundle),
+		):
+			skills, _tools = build_structured_runtime_capabilities(resolved, include_bundles=True)
+
+		self.assertIsInstance(skills[0], BundleExternalRuntimeSkill)
+		self.assertEqual(skills[0].bundle, bundle)
+		snapshot = skills[0].model_dump(mode="json", by_alias=True, exclude={"fingerprint"})
+		self.assertEqual(skills[0].fingerprint, configuration_fingerprint(snapshot))
 
 	def test_skill_dto_rejects_a_fingerprint_for_different_content(self):
 		with self.assertRaisesRegex(ValueError, "fingerprint does not match"):

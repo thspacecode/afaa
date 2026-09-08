@@ -1,0 +1,103 @@
+{
+ "actions": [],
+ "autoname": "field:version_id",
+ "creation": "2026-09-08 11:08:21.071636",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "version_id",
+  "skill",
+  "bundle_digest",
+  "file_count",
+  "total_bytes",
+  "manifest",
+  "files"
+ ],
+ "fields": [
+  {
+   "fieldname": "version_id",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Version ID",
+   "no_copy": 1,
+   "read_only": 1,
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "skill",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "AI Skill",
+   "options": "AI Skill",
+   "read_only": 1,
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "bundle_digest",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Bundle Digest",
+   "read_only": 1,
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "file_count",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "File Count",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "total_bytes",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Total Bytes",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "default": "{\"files\":[]}",
+   "fieldname": "manifest",
+   "fieldtype": "Code",
+   "hidden": 1,
+   "label": "Canonical Manifest",
+   "options": "JSON",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "files",
+   "fieldtype": "Table",
+   "hidden": 1,
+   "label": "Files",
+   "options": "AI Skill Bundle File",
+   "read_only": 1
+  }
+ ],
+ "grid_page_length": 50,
+ "links": [],
+ "modified": "2026-09-08 11:40:40.959007",
+ "modified_by": "Administrator",
+ "module": "AFAA Setup",
+ "name": "AI Skill Bundle Version",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "export": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager"
+  }
+ ],
+ "row_format": "Dynamic",
+ "rows_threshold_for_grid_search": 20,
+ "search_fields": "skill,bundle_digest",
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "version_id"
+}

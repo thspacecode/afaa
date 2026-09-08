@@ -19,7 +19,9 @@
   "instructions",
   "required_tools_tab",
   "tools_section",
-  "required_tools"
+  "required_tools",
+  "resources_tab",
+  "bundle_manager"
  ],
  "fields": [
   {
@@ -35,6 +37,8 @@
    "fieldtype": "Data",
    "in_list_view": 1,
    "label": "Skill Key",
+   "no_copy": 1,
+   "read_only_depends_on": "eval:!doc.__islocal",
    "reqd": 1,
    "show_description_on_click": 1,
    "unique": 1
@@ -97,12 +101,22 @@
    "fieldname": "required_tools_tab",
    "fieldtype": "Tab Break",
    "label": "Required Tools"
+  },
+  {
+   "fieldname": "resources_tab",
+   "fieldtype": "Tab Break",
+   "label": "Resources"
+  },
+  {
+   "fieldname": "bundle_manager",
+   "fieldtype": "HTML",
+   "label": "Skill Bundle"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-08-22 19:24:24.733400",
+ "modified": "2026-09-08 11:17:25.170948",
  "modified_by": "Administrator",
  "module": "AFAA Setup",
  "name": "AI Skill",
