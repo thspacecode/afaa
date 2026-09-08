@@ -658,6 +658,27 @@ def resolve_skill_bundle_version(
 	)
 
 
+def _validate_bundle_reference_values(
+	reference_doctype: str, reference_name: str, reference_key: str
+) -> None:
+	for label, value in (
+		(_("Reference DocType"), reference_doctype),
+		(_("Reference Name"), reference_name),
+		(_("Reference Key"), reference_key),
+	):
+		if not isinstance(value, str) or not value or len(value) > 140 or any(ord(c) < 32 for c in value):
+			raise frappe.ValidationError(_("{0} is invalid.").format(label))
+
+
+def _bundle_reference_id(
+	version_id: str, *, reference_doctype: str, reference_name: str, reference_key: str
+) -> str:
+	_validate_bundle_reference_values(reference_doctype, reference_name, reference_key)
+	return hashlib.sha256(
+		f"{version_id}\0{reference_doctype}\0{reference_name}\0{reference_key}".encode()
+	).hexdigest()
+
+
 def retain_skill_bundle_version(
 	version_id: str,
 	*,
@@ -672,16 +693,12 @@ def retain_skill_bundle_version(
 	if not locked:
 		raise frappe.ValidationError(_("The retained AI Skill bundle version is unavailable."))
 	resolve_skill_bundle_version(version_id)
-	for label, value in (
-		(_("Reference DocType"), reference_doctype),
-		(_("Reference Name"), reference_name),
-		(_("Reference Key"), reference_key),
-	):
-		if not isinstance(value, str) or not value or len(value) > 140 or any(ord(c) < 32 for c in value):
-			raise frappe.ValidationError(_("{0} is invalid.").format(label))
-	reference_id = hashlib.sha256(
-		f"{version_id}\0{reference_doctype}\0{reference_name}\0{reference_key}".encode()
-	).hexdigest()
+	reference_id = _bundle_reference_id(
+		version_id,
+		reference_doctype=reference_doctype,
+		reference_name=reference_name,
+		reference_key=reference_key,
+	)
 	if not frappe.db.exists("AI Skill Bundle Reference", reference_id):
 		reference = frappe.get_doc(
 			{
@@ -705,20 +722,320 @@ def release_skill_bundle_version(
 	reference_name: str,
 	reference_key: str,
 ) -> None:
-	reference_id = hashlib.sha256(
-		f"{version_id}\0{reference_doctype}\0{reference_name}\0{reference_key}".encode()
-	).hexdigest()
+	reference_id = _bundle_reference_id(
+		version_id,
+		reference_doctype=reference_doctype,
+		reference_name=reference_name,
+		reference_key=reference_key,
+	)
 	if frappe.db.exists("AI Skill Bundle Reference", reference_id):
 		reference = frappe.get_doc("AI Skill Bundle Reference", reference_id)
 		reference.flags.afaa_bundle_internal = True
 		reference.delete(ignore_permissions=True)
 
 
-def garbage_collect_skill_bundle_versions(*, older_than_days: int = 30, dry_run: bool = True) -> list[str]:
+def _valid_sha256(value: Any) -> bool:
+	return (
+		isinstance(value, str)
+		and len(value) == 64
+		and all(character in "0123456789abcdef" for character in value)
+	)
+
+
+def _validate_external_bundle_identity(*, skill_key: str, bundle_digest: str, bundle_reference: str) -> None:
+	# This validates the same stable key format used to derive managed bundle roots.
+	skill_bundle_root(skill_key)
+	if not _valid_sha256(bundle_digest):
+		raise frappe.ValidationError(_("AI Skill bundle digest is invalid."))
+	if not _valid_sha256(bundle_reference):
+		raise frappe.ValidationError(_("AI Skill bundle reference is invalid."))
+
+
+def _external_runtime_bundle_payload(
+	resolved: ResolvedSkillBundle, *, reference: str, include_files: bool
+) -> dict[str, Any]:
+	"""Translate the immutable storage model into Porch's strict bundle contract."""
+	manifest = [
+		{
+			"path": item.path,
+			"byteLength": item.byte_length,
+			"sha256": item.sha256,
+			"encoding": item.encoding,
+			"contentType": None,
+		}
+		for item in resolved.manifest
+	]
+	payload = {
+		"digest": bundle_digest(manifest),
+		"reference": reference,
+		"fileCount": resolved.file_count,
+		"byteCount": resolved.total_bytes,
+	}
+	if include_files:
+		payload.update(
+			{
+				"manifest": manifest,
+				"files": [
+					{"path": item.path, "encoding": item.encoding, "content": item.content}
+					for item in resolved.files
+				],
+			}
+		)
+	return payload
+
+
+def create_external_runtime_bundle_version(
+	skill_key: str, reference_doctype: str, reference_name: str
+) -> dict[str, Any]:
+	"""Create and retain one immutable bundle for a trusted external runtime record."""
+	skill_bundle_root(skill_key)
+	_validate_bundle_reference_values(reference_doctype, reference_name, skill_key)
+	version = create_skill_bundle_version(skill_key)
+	resolved = resolve_skill_bundle_version(version.version_id, expected_skill_key=skill_key)
+	payload = _external_runtime_bundle_payload(resolved, reference=version.version_id, include_files=False)
+	retain_skill_bundle_version(
+		version.version_id,
+		reference_doctype=reference_doctype,
+		reference_name=reference_name,
+		reference_key=skill_key,
+	)
+	return payload
+
+
+def _get_external_bundle_reference(
+	version_id: str, *, reference_doctype: str, reference_name: str, reference_key: str
+):
+	reference_id = _bundle_reference_id(
+		version_id,
+		reference_doctype=reference_doctype,
+		reference_name=reference_name,
+		reference_key=reference_key,
+	)
+	reference = frappe.db.get_value(
+		"AI Skill Bundle Reference",
+		reference_id,
+		["name", "bundle_version", "reference_doctype", "reference_name", "reference_key"],
+		as_dict=True,
+	)
+	if not reference:
+		return None
+	if (
+		reference.bundle_version,
+		reference.reference_doctype,
+		reference.reference_name,
+		reference.reference_key,
+	) != (version_id, reference_doctype, reference_name, reference_key):
+		raise frappe.ValidationError(_("The retained AI Skill bundle reference is invalid."))
+	return reference
+
+
+def resolve_external_runtime_bundle_version(
+	skill_key: str,
+	bundle_digest: str,
+	bundle_reference: str,
+	reference_doctype: str,
+	reference_name: str,
+) -> dict[str, Any]:
+	"""Resolve exact retained bytes only for the external record that pinned them."""
+	_validate_external_bundle_identity(
+		skill_key=skill_key,
+		bundle_digest=bundle_digest,
+		bundle_reference=bundle_reference,
+	)
+	locked = frappe.db.sql(
+		"select name from `tabAI Skill Bundle Version` where name = %s for update",
+		bundle_reference,
+	)
+	if not locked:
+		raise frappe.ValidationError(_("The retained AI Skill bundle version is unavailable."))
+	if not _get_external_bundle_reference(
+		bundle_reference,
+		reference_doctype=reference_doctype,
+		reference_name=reference_name,
+		reference_key=skill_key,
+	):
+		raise frappe.ValidationError(_("The retained AI Skill bundle reference is unavailable."))
+	resolved = resolve_skill_bundle_version(bundle_reference, expected_skill_key=skill_key)
+	payload = _external_runtime_bundle_payload(resolved, reference=bundle_reference, include_files=True)
+	if payload["digest"] != bundle_digest:
+		raise frappe.ValidationError(_("The retained AI Skill bundle digest is invalid."))
+	return payload
+
+
+def release_external_runtime_bundle_version(
+	skill_key: str,
+	bundle_digest: str,
+	bundle_reference: str,
+	reference_doctype: str,
+	reference_name: str,
+) -> None:
+	"""Idempotently release only the exact external record's retention reference."""
+	_validate_external_bundle_identity(
+		skill_key=skill_key,
+		bundle_digest=bundle_digest,
+		bundle_reference=bundle_reference,
+	)
+	reference = _get_external_bundle_reference(
+		bundle_reference,
+		reference_doctype=reference_doctype,
+		reference_name=reference_name,
+		reference_key=skill_key,
+	)
+	if not reference:
+		return
+	if frappe.db.exists("AI Skill Bundle Version", bundle_reference):
+		resolved = resolve_skill_bundle_version(bundle_reference, expected_skill_key=skill_key)
+		payload = _external_runtime_bundle_payload(resolved, reference=bundle_reference, include_files=False)
+		if payload["digest"] != bundle_digest:
+			raise frappe.ValidationError(_("The retained AI Skill bundle digest is invalid."))
+	release_skill_bundle_version(
+		bundle_reference,
+		reference_doctype=reference_doctype,
+		reference_name=reference_name,
+		reference_key=skill_key,
+	)
+
+
+def _reconciliation_reference(value: Any) -> dict[str, str]:
+	if hasattr(value, "as_dict"):
+		value = value.as_dict()
+	if not isinstance(value, dict) or set(value) != {
+		"skillKey",
+		"bundleDigest",
+		"bundleReference",
+		"referenceDoctype",
+		"referenceName",
+	}:
+		raise frappe.ValidationError(_("AI Skill bundle reconciliation input is invalid."))
+	reference = {
+		"skill_key": value["skillKey"],
+		"bundle_digest": value["bundleDigest"],
+		"bundle_reference": value["bundleReference"],
+		"reference_doctype": value["referenceDoctype"],
+		"reference_name": value["referenceName"],
+	}
+	_validate_external_bundle_identity(
+		skill_key=reference["skill_key"],
+		bundle_digest=reference["bundle_digest"],
+		bundle_reference=reference["bundle_reference"],
+	)
+	_validate_bundle_reference_values(
+		reference["reference_doctype"], reference["reference_name"], reference["skill_key"]
+	)
+	reference["reference_id"] = _bundle_reference_id(
+		reference["bundle_reference"],
+		reference_doctype=reference["reference_doctype"],
+		reference_name=reference["reference_name"],
+		reference_key=reference["skill_key"],
+	)
+	return reference
+
+
+def reconcile_external_runtime_bundle_references(
+	references: list[dict[str, Any]], dry_run: bool = True
+) -> dict[str, int]:
+	"""Report and repair retention metadata from Porch's authoritative thread snapshots."""
+	if not isinstance(dry_run, bool) or not isinstance(references, (list, tuple)):
+		raise frappe.ValidationError(_("AI Skill bundle reconciliation input is invalid."))
+
+	expected = {}
+	for raw_reference in references:
+		reference = _reconciliation_reference(raw_reference)
+		if reference["reference_id"] in expected:
+			raise frappe.ValidationError(_("AI Skill bundle reconciliation contains duplicates."))
+		expected[reference["reference_id"]] = reference
+
+	actual_rows = frappe.get_all(
+		"AI Skill Bundle Reference",
+		fields=["name", "bundle_version", "reference_doctype", "reference_name", "reference_key"],
+	)
+	actual = {row.name: row for row in actual_rows}
+	missing_references: set[str] = set()
+	missing_versions: set[str] = set()
+	inconsistent_references: set[str] = set()
+	existing_expected_versions: set[str] = set()
+	valid_expected_versions: set[str] = set()
+	created_reference_count = 0
+
+	for reference_id, reference in expected.items():
+		version_id = reference["bundle_reference"]
+		version_exists = bool(frappe.db.exists("AI Skill Bundle Version", version_id))
+		if not version_exists:
+			missing_versions.add(reference_id)
+		else:
+			existing_expected_versions.add(version_id)
+			try:
+				resolved = resolve_skill_bundle_version(version_id, expected_skill_key=reference["skill_key"])
+				payload = _external_runtime_bundle_payload(
+					resolved, reference=version_id, include_files=False
+				)
+				if payload["digest"] != reference["bundle_digest"]:
+					raise ValueError
+			except Exception:
+				inconsistent_references.add(reference_id)
+			else:
+				valid_expected_versions.add(version_id)
+
+		row = actual.get(reference_id)
+		if not row:
+			missing_references.add(reference_id)
+			if not dry_run and version_id in valid_expected_versions:
+				retain_skill_bundle_version(
+					version_id,
+					reference_doctype=reference["reference_doctype"],
+					reference_name=reference["reference_name"],
+					reference_key=reference["skill_key"],
+				)
+				created_reference_count += 1
+		elif (
+			row.bundle_version,
+			row.reference_doctype,
+			row.reference_name,
+			row.reference_key,
+		) != (
+			version_id,
+			reference["reference_doctype"],
+			reference["reference_name"],
+			reference["skill_key"],
+		):
+			inconsistent_references.add(reference_id)
+
+	for reference_id, row in actual.items():
+		if not frappe.db.exists("AI Skill Bundle Version", row.bundle_version):
+			missing_versions.add(reference_id)
+		if reference_id not in expected:
+			inconsistent_references.add(reference_id)
+
+	eligible_versions = set(
+		garbage_collect_skill_bundle_versions(
+			older_than_days=30,
+			dry_run=dry_run,
+			_protected_version_ids=existing_expected_versions,
+		)
+	)
+	deleted_version_count = 0 if dry_run else len(eligible_versions)
+
+	return {
+		"missingReferenceCount": len(missing_references),
+		"missingVersionCount": len(missing_versions),
+		"unreferencedVersionCount": len(eligible_versions),
+		"inconsistentReferenceCount": len(inconsistent_references),
+		"createdReferenceCount": created_reference_count,
+		"deletedVersionCount": deleted_version_count,
+	}
+
+
+def garbage_collect_skill_bundle_versions(
+	*,
+	older_than_days: int = 30,
+	dry_run: bool = True,
+	_protected_version_ids: set[str] | None = None,
+) -> list[str]:
 	"""Delete unreferenced immutable versions only after a locked reference recheck."""
 	frappe.only_for("System Manager")
 	if older_than_days < 0:
 		raise frappe.ValidationError(_("Bundle retention days cannot be negative."))
+	protected_version_ids = _protected_version_ids or set()
 	cutoff = now_datetime() - timedelta(days=older_than_days)
 	candidates = frappe.get_all(
 		"AI Skill Bundle Version",
@@ -729,7 +1046,9 @@ def garbage_collect_skill_bundle_versions(*, older_than_days: int = 30, dry_run:
 	eligible = []
 	for version_id in candidates:
 		frappe.db.sql("select name from `tabAI Skill Bundle Version` where name = %s for update", version_id)
-		if frappe.db.exists("AI Skill Bundle Reference", {"bundle_version": version_id}):
+		if version_id in protected_version_ids or frappe.db.exists(
+			"AI Skill Bundle Reference", {"bundle_version": version_id}
+		):
 			continue
 		eligible.append(version_id)
 		if dry_run:
