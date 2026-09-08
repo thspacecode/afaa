@@ -29,7 +29,20 @@ class AISkill(Document):
 
 	def validate(self):
 		validate_key(self.skill_key, _("Skill Key"))
+		stored_key = None if self.is_new() else frappe.db.get_value(self.doctype, self.name, "skill_key")
+		if stored_key and stored_key != self.skill_key:
+			frappe.throw(_("Skill Key cannot be changed after creation."), frappe.PermissionError)
 		self.validate_tools()
+
+	def after_insert(self):
+		from afaa.ai.skill_bundles import ensure_skill_bundle_root
+
+		ensure_skill_bundle_root(self.name)
+
+	def before_rename(self, old_name, new_name, merge=False):
+		frappe.throw(
+			_("AI Skills cannot be renamed because Skill Key is a stable identity."), frappe.PermissionError
+		)
 
 	def validate_tools(self):
 		seen = set()

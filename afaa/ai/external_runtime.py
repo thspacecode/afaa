@@ -12,6 +12,7 @@ from frappe import _
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 
 from afaa.ai.runtime import resolve_ai_agent
+from afaa.ai.skill_bundles import SkillBundleReference
 from afaa.ai.tools import EXTERNAL_READ_TOOL_METHODS, get_tool_definition
 
 
@@ -29,16 +30,24 @@ class ExternalRuntimeSkill(BaseModel):
 
 	@model_validator(mode="after")
 	def validate_fingerprint(self) -> ExternalRuntimeSkill:
+		bundle = getattr(self, "bundle", None)
 		expected = external_skill_fingerprint(
 			key=self.key,
 			name=self.name,
 			description=self.description,
 			instructions=self.instructions,
 			required_tools=self.required_tools,
+			bundle=bundle,
 		)
 		if self.fingerprint != expected:
 			raise ValueError("skill fingerprint does not match its content")
 		return self
+
+
+class BundleExternalRuntimeSkill(ExternalRuntimeSkill):
+	"""Bundle-aware skill metadata safe to pin without raw file bodies."""
+
+	bundle: SkillBundleReference
 
 
 class ExternalRuntimeTool(BaseModel):
@@ -255,6 +264,8 @@ def resolve_codex_external_runtime(
 
 def build_structured_runtime_capabilities(
 	resolved,
+	*,
+	include_bundles: bool = False,
 ) -> tuple[tuple[ExternalRuntimeSkill, ...], tuple[ExternalRuntimeTool, ...]]:
 	"""Build deterministic skill DTOs and approved tools from one resolved agent."""
 	tools = []
@@ -282,6 +293,7 @@ def build_structured_runtime_capabilities(
 
 	external_tool_keys = {tool.key for tool in tools}
 	skills = []
+	aggregate_bundle_bytes = 0
 	for skill in sorted(resolved.skills, key=lambda item: item.key):
 		required_tools = tuple(sorted(set(skill.required_tools)))
 		unsupported = set(required_tools) - external_tool_keys
@@ -299,12 +311,33 @@ def build_structured_runtime_capabilities(
 			"instructions": skill.instructions,
 			"requiredTools": required_tools,
 		}
+		skill_type: type[ExternalRuntimeSkill] = ExternalRuntimeSkill
+		if include_bundles:
+			from afaa.ai.skill_bundles import create_skill_bundle_version, get_skill_bundle_limits
+
+			bundle = create_skill_bundle_version(skill.key)
+			aggregate_bundle_bytes += bundle.total_bytes
+			if aggregate_bundle_bytes > get_skill_bundle_limits().max_agent_bundle_bytes:
+				frappe.throw(
+					_("Agent bundles exceed afaa_skill_bundle_max_agent_bundle_bytes ({0}).").format(
+						get_skill_bundle_limits().max_agent_bundle_bytes
+					),
+					frappe.ValidationError,
+				)
+			snapshot["bundle"] = bundle.model_dump(mode="json", by_alias=True)
+			skill_type = BundleExternalRuntimeSkill
 		skills.append(
-			ExternalRuntimeSkill.model_validate(
-				{**snapshot, "fingerprint": configuration_fingerprint(snapshot)}
-			)
+			skill_type.model_validate({**snapshot, "fingerprint": configuration_fingerprint(snapshot)})
 		)
 	return tuple(skills), tuple(tools)
+
+
+def build_bundle_aware_runtime_capabilities(
+	resolved,
+) -> tuple[tuple[BundleExternalRuntimeSkill, ...], tuple[ExternalRuntimeTool, ...]]:
+	"""Explicit bundle-aware contract used when a caller negotiates bundle snapshots."""
+	skills, tools = build_structured_runtime_capabilities(resolved, include_bundles=True)
+	return tuple(BundleExternalRuntimeSkill.model_validate(skill) for skill in skills), tools
 
 
 def _base_configuration(resolved, instructions: tuple[str, ...]) -> dict[str, Any]:
@@ -343,17 +376,24 @@ def external_skill_fingerprint(
 	description: str | None,
 	instructions: str,
 	required_tools: tuple[str, ...] | list[str],
+	bundle: Any | None = None,
+	bundle_digest: str | None = None,
 ) -> str:
 	"""Hash exactly the immutable fields carried by a pinned skill DTO."""
-	return configuration_fingerprint(
-		{
-			"key": key,
-			"name": name,
-			"description": description,
-			"instructions": instructions,
-			"requiredTools": tuple(required_tools),
-		}
-	)
+	payload = {
+		"key": key,
+		"name": name,
+		"description": description,
+		"instructions": instructions,
+		"requiredTools": tuple(required_tools),
+	}
+	if bundle is not None:
+		payload["bundle"] = (
+			bundle.model_dump(mode="json", by_alias=True) if isinstance(bundle, BaseModel) else bundle
+		)
+	elif bundle_digest is not None:
+		payload["bundleDigest"] = bundle_digest
+	return configuration_fingerprint(payload)
 
 
 def configuration_fingerprint(configuration: dict[str, Any]) -> str:

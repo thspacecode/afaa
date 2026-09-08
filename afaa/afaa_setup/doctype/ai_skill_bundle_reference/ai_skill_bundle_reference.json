@@ -1,0 +1,72 @@
+{
+ "actions": [],
+ "autoname": "field:reference_id",
+ "creation": "2026-09-08 11:08:21.387130",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "reference_id",
+  "bundle_version",
+  "reference_doctype",
+  "reference_name",
+  "reference_key"
+ ],
+ "fields": [
+  {
+   "fieldname": "reference_id",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Reference ID",
+   "no_copy": 1,
+   "read_only": 1,
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "bundle_version",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Bundle Version",
+   "options": "AI Skill Bundle Version",
+   "read_only": 1,
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "reference_doctype",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Reference DocType",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "reference_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Reference Name",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "reference_key",
+   "fieldtype": "Data",
+   "label": "Reference Key",
+   "read_only": 1,
+   "reqd": 1
+  }
+ ],
+ "grid_page_length": 50,
+ "links": [],
+ "modified": "2026-09-08 11:40:41.253232",
+ "modified_by": "Administrator",
+ "module": "AFAA Setup",
+ "name": "AI Skill Bundle Reference",
+ "owner": "Administrator",
+ "permissions": [],
+ "row_format": "Dynamic",
+ "rows_threshold_for_grid_search": 20,
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": []
+}

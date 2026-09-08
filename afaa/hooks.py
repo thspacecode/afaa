@@ -147,21 +147,20 @@ export_python_type_annotations = True
 # 	"Event": "frappe.desk.doctype.event.event.get_permission_query_conditions",
 # }
 #
-# has_permission = {
-# 	"Event": "frappe.desk.doctype.event.event.has_permission",
-# }
+has_permission = {
+	"File": "afaa.ai.skill_bundles.has_bundle_file_permission",
+}
 
 # Document Events
 # ---------------
 # Hook on document methods and events
 
-# doc_events = {
-# 	"*": {
-# 		"on_update": "method",
-# 		"on_cancel": "method",
-# 		"on_trash": "method"
-# 	}
-# }
+doc_events = {
+	"File": {
+		"validate": "afaa.ai.skill_bundles.validate_bundle_file_record",
+		"on_trash": "afaa.ai.skill_bundles.protect_bundle_file_delete",
+	}
+}
 
 # Scheduled Tasks
 # ---------------
