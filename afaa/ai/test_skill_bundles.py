@@ -3,18 +3,23 @@
 
 import base64
 import hashlib
+import json
 
 import frappe
 
 from afaa.ai.skill_bundles import (
 	EMPTY_BUNDLE_DIGEST,
 	canonical_relative_path,
+	create_external_runtime_bundle_version,
 	create_skill_bundle_version,
 	delete_bundle_member,
 	garbage_collect_skill_bundle_versions,
 	get_bundle_tree,
 	read_bundle_file,
+	reconcile_external_runtime_bundle_references,
+	release_external_runtime_bundle_version,
 	release_skill_bundle_version,
+	resolve_external_runtime_bundle_version,
 	resolve_skill_bundle_version,
 	retain_skill_bundle_version,
 	upload_bundle_file,
@@ -188,3 +193,139 @@ class TestSkillBundles(AFAATestSuite):
 		for path in ("/absolute", "../escape", "a//b", "a/./b", "a\\b", "null\x00byte"):
 			with self.subTest(path=path), self.assertRaises(ValueError):
 				canonical_relative_path(path)
+
+	def test_external_runtime_contract_retains_and_resolves_exact_pinned_bytes(self):
+		skill = self.make_skill()
+		upload_bundle_file(skill.name, "references/guide.txt", base64.b64encode(b"version one").decode())
+		identity = {
+			"skill_key": skill.name,
+			"reference_doctype": "P Thread",
+			"reference_name": "external-thread",
+		}
+		pinned = create_external_runtime_bundle_version(**identity)
+		self.assertEqual(set(pinned), {"digest", "reference", "fileCount", "byteCount"})
+		self.assertEqual((pinned["fileCount"], pinned["byteCount"]), (1, 11))
+		self.assertTrue(
+			frappe.db.exists(
+				"AI Skill Bundle Reference",
+				{
+					"bundle_version": pinned["reference"],
+					"reference_doctype": "P Thread",
+					"reference_name": "external-thread",
+					"reference_key": skill.name,
+				},
+			)
+		)
+
+		upload_bundle_file(skill.name, "references/guide.txt", base64.b64encode(b"version two").decode())
+		resolved = resolve_external_runtime_bundle_version(
+			**identity,
+			bundle_digest=pinned["digest"],
+			bundle_reference=pinned["reference"],
+		)
+		self.assertEqual(
+			set(resolved),
+			{"digest", "reference", "fileCount", "byteCount", "manifest", "files"},
+		)
+		self.assertEqual(
+			resolved["manifest"],
+			[
+				{
+					"path": "references/guide.txt",
+					"byteLength": 11,
+					"sha256": hashlib.sha256(b"version one").hexdigest(),
+					"encoding": "base64",
+					"contentType": None,
+				}
+			],
+		)
+		self.assertEqual(
+			resolved["files"],
+			[
+				{
+					"path": "references/guide.txt",
+					"encoding": "base64",
+					"content": base64.b64encode(b"version one").decode(),
+				}
+			],
+		)
+		self.assertEqual(
+			resolved["digest"],
+			hashlib.sha256(
+				json.dumps(
+					{"files": resolved["manifest"]},
+					sort_keys=True,
+					separators=(",", ":"),
+				).encode()
+			).hexdigest(),
+		)
+
+		release_external_runtime_bundle_version(
+			**identity,
+			bundle_digest=pinned["digest"],
+			bundle_reference=pinned["reference"],
+		)
+		release_external_runtime_bundle_version(
+			**identity,
+			bundle_digest=pinned["digest"],
+			bundle_reference=pinned["reference"],
+		)
+		self.assertFalse(
+			frappe.db.exists(
+				"AI Skill Bundle Reference",
+				{"bundle_version": pinned["reference"], "reference_name": "external-thread"},
+			)
+		)
+
+	def test_external_runtime_resolution_rejects_another_reference_or_digest(self):
+		skill = self.make_skill()
+		pinned = create_external_runtime_bundle_version(skill.name, "P Thread", "bound-thread")
+		with self.assertRaisesRegex(frappe.ValidationError, "reference is unavailable"):
+			resolve_external_runtime_bundle_version(
+				skill.name,
+				pinned["digest"],
+				pinned["reference"],
+				"P Thread",
+				"another-thread",
+			)
+		with self.assertRaisesRegex(frappe.ValidationError, "digest is invalid"):
+			resolve_external_runtime_bundle_version(
+				skill.name,
+				"0" * 64,
+				pinned["reference"],
+				"P Thread",
+				"bound-thread",
+			)
+
+	def test_external_runtime_reconciliation_recreates_a_missing_reference(self):
+		skill = self.make_skill()
+		pinned = create_external_runtime_bundle_version(skill.name, "P Thread", "repair-thread")
+		release_external_runtime_bundle_version(
+			skill.name,
+			pinned["digest"],
+			pinned["reference"],
+			"P Thread",
+			"repair-thread",
+		)
+		references = [
+			{
+				"skillKey": skill.name,
+				"bundleDigest": pinned["digest"],
+				"bundleReference": pinned["reference"],
+				"referenceDoctype": "P Thread",
+				"referenceName": "repair-thread",
+			}
+		]
+		dry_run = reconcile_external_runtime_bundle_references(references, dry_run=True)
+		self.assertEqual(dry_run["missingReferenceCount"], 1)
+		self.assertEqual(dry_run["createdReferenceCount"], 0)
+
+		repaired = reconcile_external_runtime_bundle_references(references, dry_run=False)
+		self.assertEqual(repaired["missingReferenceCount"], 1)
+		self.assertEqual(repaired["createdReferenceCount"], 1)
+		self.assertTrue(
+			frappe.db.exists(
+				"AI Skill Bundle Reference",
+				{"bundle_version": pinned["reference"], "reference_name": "repair-thread"},
+			)
+		)
