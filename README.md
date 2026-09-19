@@ -12,11 +12,11 @@ bench get-app https://github.com/thspacecode/afaa.git --branch version-16
 bench --site $SITE install-app afaa
 ```
 
-AFAA installs `pydantic-ai-slim` with the Google and OpenAI provider SDKs by default.
+AFAA installs `pydantic-ai-slim` with the OpenAI, Google, Z.AI, and Moonshot provider SDKs by default.
 
 ## Extending providers
 
-OpenAI and Google adapters are built in. Another app can register a custom provider:
+OpenAI, OpenAI Codex Subscription, Google, Z.AI, and Moonshot adapters are built in. Another app can register a custom provider:
 
 ```python
 # hooks.py

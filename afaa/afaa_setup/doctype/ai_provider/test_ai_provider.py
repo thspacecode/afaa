@@ -14,4 +14,6 @@ class TestAIProvider(AFAATestSuite):
 		self.assertIn("openai", providers)
 		self.assertIn("openai_codex", providers)
 		self.assertIn("google", providers)
+		self.assertIn("zai", providers)
+		self.assertIn("moonshot", providers)
 		self.assertNotIn("anthropic", providers)

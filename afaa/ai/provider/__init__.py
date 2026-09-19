@@ -10,14 +10,16 @@ from frappe import _
 
 from afaa.ai.provider.base_provider import BaseProvider
 from afaa.ai.provider.google_provider import GoogleProvider
+from afaa.ai.provider.moonshot_provider import MoonshotProvider
 from afaa.ai.provider.openai_codex_provider import OpenAICodexProvider
 from afaa.ai.provider.openai_provider import OpenAIProvider
+from afaa.ai.provider.zai_provider import ZaiProvider
 
 if TYPE_CHECKING:
 	from afaa.afaa_setup.doctype.ai_model.ai_model import AIModel
 	from afaa.afaa_setup.doctype.ai_provider_account.ai_provider_account import AIProviderAccount
 
-BUILTIN_PROVIDERS = (OpenAIProvider, OpenAICodexProvider, GoogleProvider)
+BUILTIN_PROVIDERS = (OpenAIProvider, OpenAICodexProvider, GoogleProvider, ZaiProvider, MoonshotProvider)
 
 
 def is_distribution_installed(distribution: str) -> bool:
