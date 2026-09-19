@@ -67,7 +67,7 @@ class ExternalRuntimeModel(BaseModel):
 
 	model_config = ConfigDict(frozen=True, extra="forbid", populate_by_name=True)
 
-	provider_type: Literal["openai", "google"] = Field(alias="providerType")
+	provider_type: Literal["openai", "google", "zai", "moonshot"] = Field(alias="providerType")
 	model_id: str = Field(alias="modelId", min_length=1, max_length=255)
 	settings: dict[str, Any]
 	timeout: float = Field(ge=1, le=3600)
@@ -183,7 +183,7 @@ def resolve_external_runtime(
 			tools=tools,
 			legacy_skill_instructions=legacy_skill_instructions,
 		)
-	if resolved.model.provider_type not in {"openai", "google"}:
+	if resolved.model.provider_type not in {"openai", "google", "zai", "moonshot"}:
 		frappe.throw(
 			_("AI provider type {0} is not supported by external runtimes.").format(
 				frappe.bold(resolved.model.provider_type)
