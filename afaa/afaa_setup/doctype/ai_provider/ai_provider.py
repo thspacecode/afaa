@@ -18,6 +18,7 @@ class AIProvider(Document):
 		from frappe.types import DF
 
 		api_key: DF.Password | None
+		base_url: DF.Data | None
 		disabled: DF.Check
 		provider_name: DF.Data
 		provider_settings: DF.JSON | None
@@ -30,6 +31,7 @@ class AIProvider(Document):
 	def validate(self):
 		self.provider_name = self.provider_type
 		self.validate_provider_type()
+		self.validate_base_url()
 
 	def validate_provider_type(self):
 		provider_class = get_provider_class(self.provider_type, require_available=False)
@@ -40,3 +42,19 @@ class AIProvider(Document):
 
 		if not self.disabled and not is_provider_available(provider_class):
 			get_provider_class(self.provider_type, require_available=True)
+
+	def validate_base_url(self):
+		base_url = (self.base_url or "").strip()
+		self.base_url = base_url
+		if not base_url:
+			return
+
+		provider_class = get_provider_class(self.provider_type, require_available=False)
+		if not provider_class.supports_base_url_override:
+			frappe.throw(
+				_("AI provider {0} does not support a custom Base URL.").format(
+					frappe.bold(provider_class.label)
+				)
+			)
+		if not base_url.startswith("https://") or len(base_url.split()) != 1:
+			frappe.throw(_("Base URL must be a valid HTTPS URL without whitespace."))

@@ -17,6 +17,7 @@ class BaseProvider(ABC):
 	supported_auth_methods: ClassVar[tuple[str, ...]] = ("API Key",)
 	supports_oauth_connection: ClassVar[bool] = False
 	model_catalog_is_account_specific: ClassVar[bool] = False
+	supports_base_url_override: ClassVar[bool] = False
 
 	def __init__(self, provider_account_doc):
 		self.provider_account_doc = provider_account_doc
@@ -63,3 +64,25 @@ class BaseProvider(ABC):
 
 	def get_api_key(self) -> str | None:
 		return self.provider_account_doc.get_password("api_key", raise_exception=False) or None
+
+	def get_base_url(self) -> str | None:
+		"""Return the validated endpoint override configured on the AI Provider doc."""
+		if not self.supports_base_url_override:
+			return None
+		provider_doc = frappe.get_doc("AI Provider", self.provider_account_doc.provider)
+		base_url = (provider_doc.base_url or "").strip()
+		return base_url or None
+
+
+def provider_with_base_url(provider_cls, base_url: str | None, *, api_key: str | None):
+	"""Instantiate a pinned-endpoint provider, optionally redirected to an
+	explicitly configured base URL by overriding its trusted endpoint property."""
+	if not base_url:
+		return provider_cls(api_key=api_key)
+
+	class CustomBaseURLProvider(provider_cls):
+		@property
+		def base_url(self) -> str:
+			return base_url
+
+	return CustomBaseURLProvider(api_key=api_key)

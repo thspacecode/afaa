@@ -90,6 +90,7 @@ def get_available_provider_types() -> list[dict[str, Any]]:
 			"required_distributions": list(provider_class.required_distributions),
 			"supported_auth_methods": list(provider_class.supported_auth_methods),
 			"supports_oauth_connection": provider_class.supports_oauth_connection,
+			"supports_base_url_override": provider_class.supports_base_url_override,
 		}
 		for provider_class in get_provider_classes(available_only=True).values()
 	]
@@ -213,6 +214,7 @@ def as_public_dict(provider_class: type[BaseProvider]) -> dict[str, Any]:
 		"available": is_provider_available(provider_class),
 		"supported_auth_methods": list(provider_class.supported_auth_methods),
 		"supports_oauth_connection": provider_class.supports_oauth_connection,
+		"supports_base_url_override": provider_class.supports_base_url_override,
 	}
 
 

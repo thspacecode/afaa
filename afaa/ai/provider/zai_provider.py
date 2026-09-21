@@ -3,7 +3,7 @@
 
 from frappe.model.document import Document
 
-from afaa.ai.provider.base_provider import BaseProvider
+from afaa.ai.provider.base_provider import BaseProvider, provider_with_base_url
 
 ZAI_BASE_URL = "https://api.z.ai/api/paas/v4"
 
@@ -12,18 +12,21 @@ class ZaiProvider(BaseProvider):
 	key = "zai"
 	label = "Z.AI"
 	required_distributions = ("openai",)
+	supports_base_url_override = True
 
 	def build_model(self, model_doc: Document):
 		from pydantic_ai.models.zai import ZaiModel
 		from pydantic_ai.providers.zai import ZaiProvider as PydanticZaiProvider
 
-		provider = PydanticZaiProvider(api_key=self.get_api_key())
+		provider = provider_with_base_url(
+			PydanticZaiProvider, self.get_base_url(), api_key=self.get_api_key()
+		)
 		return ZaiModel(model_doc.model_id, provider=provider)
 
 	def list_models(self) -> list[str]:
 		from openai import OpenAI
 
-		with OpenAI(api_key=self.get_api_key(), base_url=ZAI_BASE_URL) as client:
+		with OpenAI(api_key=self.get_api_key(), base_url=self.get_base_url() or ZAI_BASE_URL) as client:
 			return [model.id for model in client.models.list().data if self.is_zai_chat_model(model.id)]
 
 	def is_zai_chat_model(self, model_id: str) -> bool:

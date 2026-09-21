@@ -20,6 +20,7 @@ class ResolvedModel(BaseModel):
 	provider_type: str
 	model_id: str
 	settings: dict[str, Any]
+	base_url: str | None = None
 
 
 class ResolvedTool(BaseModel):
@@ -183,6 +184,7 @@ def resolve_ai_agent(agent_name: str, context=None, *, require_enabled: bool = T
 			provider_type=provider.provider_type,
 			model_id=model.model_id,
 			settings=settings,
+			base_url=(provider.base_url or "").strip() or None,
 		),
 		prompt=render_system_prompt(agent.system_prompt, context),
 		tasks=tuple(tasks),

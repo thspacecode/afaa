@@ -9,6 +9,8 @@
   "disabled",
   "provider_name",
   "provider_type",
+  "endpoint_section",
+  "base_url",
   "connection_section",
   "api_key",
   "connection_column",
@@ -38,6 +40,19 @@
    "fieldtype": "Check",
    "in_list_view": 1,
    "label": "Disabled"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "endpoint_section",
+   "fieldtype": "Section Break",
+   "label": "Endpoint"
+  },
+  {
+   "description": "Optional HTTPS API endpoint override for OpenAI-compatible providers, for example the Z.AI GLM Coding Plan endpoint (https://api.z.ai/api/coding/paas/v4). Leave empty to use the provider's standard endpoint.",
+   "fieldname": "base_url",
+   "fieldtype": "Data",
+   "label": "Base URL",
+   "length": 512
   },
   {
    "fieldname": "connection_section",
@@ -76,7 +91,7 @@
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-08-22 19:42:39.868256",
+ "modified": "2026-09-21 10:20:00.000000",
  "modified_by": "Administrator",
  "module": "AFAA Setup",
  "name": "AI Provider",

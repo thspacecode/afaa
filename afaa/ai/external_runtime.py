@@ -73,6 +73,18 @@ class ExternalRuntimeModel(BaseModel):
 	timeout: float = Field(ge=1, le=3600)
 	retries: int = Field(ge=0, le=10)
 	api_key: SecretStr = Field(alias="apiKey")
+	base_url: str | None = Field(default=None, alias="baseUrl", max_length=512)
+
+	@field_validator("base_url")
+	@classmethod
+	def validate_base_url(cls, value: str | None) -> str | None:
+		if value is None:
+			return None
+		if any(ord(character) < 32 or ord(character) == 127 for character in value):
+			raise ValueError("base URL contains control characters")
+		if not value.startswith("https://") or len(value.split()) != 1:
+			raise ValueError("base URL must be a valid HTTPS URL without whitespace")
+		return value
 
 
 class ExternalRuntimeConfig(BaseModel):
@@ -90,6 +102,10 @@ class ExternalRuntimeConfig(BaseModel):
 	def private_payload(self) -> dict[str, Any]:
 		"""Serialize for a trusted machine caller, including the provider secret."""
 		payload = self.model_dump(mode="json", by_alias=True)
+		if self.model.base_url is None:
+			# Omit the key entirely so runtimes without base-URL support (which
+			# forbid unknown model fields) keep accepting this payload.
+			payload["model"].pop("baseUrl", None)
 		payload["model"]["apiKey"] = self.model.api_key.get_secret_value()
 		return payload
 
@@ -341,18 +357,22 @@ def build_bundle_aware_runtime_capabilities(
 
 
 def _base_configuration(resolved, instructions: tuple[str, ...]) -> dict[str, Any]:
+	model = {
+		"providerType": resolved.model.provider_type,
+		"modelId": resolved.model.model_id,
+		"settings": resolved.model.settings,
+		"timeout": resolved.timeout,
+		"retries": resolved.retries,
+	}
+	base_url = (getattr(resolved.model, "base_url", None) or "").strip()
+	if base_url:
+		model["baseUrl"] = base_url
 	return {
 		"schemaVersion": 1,
 		"agentId": f"afaa:{resolved.key}",
 		"name": resolved.name,
 		"instructions": instructions,
-		"model": {
-			"providerType": resolved.model.provider_type,
-			"modelId": resolved.model.model_id,
-			"settings": resolved.model.settings,
-			"timeout": resolved.timeout,
-			"retries": resolved.retries,
-		},
+		"model": model,
 	}
 
 
