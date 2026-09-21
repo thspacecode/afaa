@@ -51,6 +51,75 @@ class TestStructuredExternalRuntime(TestCase):
 		self.assertNotIn("method", str(payload["tools"]).lower())
 		self.assertEqual(payload["model"]["apiKey"], "server-only-secret")
 
+	def test_payload_carries_provider_base_url_when_configured(self):
+		resolved = make_resolved_agent()
+		resolved.model.base_url = "https://api.z.ai/api/coding/paas/v4"
+		resolved.model.provider_type = "zai"
+		account = SimpleNamespace(
+			name="provider-account",
+			get_password=lambda *_args, **_kwargs: "server-only-secret",
+		)
+
+		with (
+			patch("afaa.ai.external_runtime.resolve_ai_agent", return_value=resolved),
+			patch("afaa.ai.external_runtime.frappe.get_doc", return_value=account),
+			patch(
+				"afaa.ai.external_runtime.get_tool_definition",
+				side_effect=lambda key: make_tool_definition(key),
+			),
+		):
+			config = resolve_external_runtime("reviewer")
+
+		payload = config.private_payload()
+		self.assertEqual(payload["model"]["baseUrl"], "https://api.z.ai/api/coding/paas/v4")
+		self.assertEqual(payload["model"]["providerType"], "zai")
+
+	def test_payload_omits_base_url_when_unset(self):
+		resolved = make_resolved_agent()
+		account = SimpleNamespace(
+			name="provider-account", get_password=lambda *_args, **_kwargs: "server-only-secret"
+		)
+
+		with (
+			patch("afaa.ai.external_runtime.resolve_ai_agent", return_value=resolved),
+			patch("afaa.ai.external_runtime.frappe.get_doc", return_value=account),
+			patch(
+				"afaa.ai.external_runtime.get_tool_definition",
+				side_effect=lambda key: make_tool_definition(key),
+			),
+		):
+			config = resolve_external_runtime("reviewer")
+
+		payload = config.private_payload()
+		self.assertNotIn("baseUrl", payload["model"])
+
+	def test_fingerprint_changes_when_base_url_changes(self):
+		def fingerprint_for(base_url: str | None) -> str:
+			resolved = make_resolved_agent()
+			resolved.model.base_url = base_url
+			resolved.model.provider_type = "zai"
+			return configuration_fingerprint(
+				{
+					"schemaVersion": 1,
+					"agentId": f"afaa:{resolved.key}",
+					"name": resolved.name,
+					"instructions": ("Review the workspace.",),
+					"model": {
+						"providerType": resolved.model.provider_type,
+						"modelId": resolved.model.model_id,
+						"settings": resolved.model.settings,
+						"timeout": resolved.timeout,
+						"retries": resolved.retries,
+						**( {"baseUrl": resolved.model.base_url} if resolved.model.base_url else {} ),
+					},
+				}
+			)
+
+		without = fingerprint_for(None)
+		with_url = fingerprint_for("https://api.z.ai/api/coding/paas/v4")
+		self.assertNotEqual(without, with_url)
+		self.assertEqual(with_url, fingerprint_for("https://api.z.ai/api/coding/paas/v4"))
+
 	def test_legacy_contract_flattens_skill_instructions_when_explicitly_requested(self):
 		resolved = make_resolved_agent()
 		account = SimpleNamespace(name="provider-account", get_password=lambda *_args, **_kwargs: "secret")
@@ -178,6 +247,7 @@ def make_resolved_agent(
 			provider_account="provider-account",
 			model_id="test-model",
 			settings={"temperature": 0.2},
+			base_url=None,
 		),
 		timeout=120.0,
 		retries=2,
