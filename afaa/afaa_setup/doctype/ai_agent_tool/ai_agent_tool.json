@@ -7,7 +7,8 @@
  "editable_grid": 1,
  "engine": "InnoDB",
  "field_order": [
-  "tool"
+  "tool",
+  "approval_policy"
  ],
  "fields": [
   {
@@ -16,6 +17,16 @@
    "in_list_view": 1,
    "label": "Tool",
    "options": "AI Tool",
+   "reqd": 1
+  },
+  {
+   "default": "always_ask",
+   "description": "Controls whether the user must approve this tool before execution.",
+   "fieldname": "approval_policy",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Approval Policy",
+   "options": "allow_without_asking\nask_unless_approved\nalways_ask",
    "reqd": 1
   }
  ],
