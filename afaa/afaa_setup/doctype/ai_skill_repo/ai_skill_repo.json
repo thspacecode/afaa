@@ -1,0 +1,198 @@
+{
+ "actions": [],
+ "autoname": "field:repo_slug",
+ "creation": "2026-09-22 15:10:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "details_tab",
+  "repository_section",
+  "repo_url",
+  "repository_column",
+  "branch",
+  "skills_folder",
+  "identity_section",
+  "repo_slug",
+  "identity_column",
+  "disabled",
+  "status_section",
+  "last_fetched_commit",
+  "status_column",
+  "last_fetched_at",
+  "last_synced_at",
+  "errors_section",
+  "last_fetch_error",
+  "last_sync_error",
+  "skills_tab",
+  "skills_section",
+  "skills"
+ ],
+ "fields": [
+  {
+   "fieldname": "details_tab",
+   "fieldtype": "Tab Break",
+   "label": "Details"
+  },
+  {
+   "description": "GitHub HTTPS repository URL, optionally with /tree/&lt;branch&gt;.",
+   "fieldname": "repo_url",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Repository URL",
+   "reqd": 1
+  },
+  {
+   "description": "Branch or tag. Empty means the repository default branch.",
+   "fieldname": "branch",
+   "fieldtype": "Data",
+   "label": "Branch"
+  },
+  {
+   "description": "Repository-relative folder that contains one sub-folder per skill.",
+   "fieldname": "skills_folder",
+   "fieldtype": "Data",
+   "label": "Skills Folder",
+   "reqd": 1
+  },
+  {
+   "description": "Stable identity used to prefix synced skill keys.",
+   "fieldname": "repo_slug",
+   "fieldtype": "Data",
+   "label": "Repo Slug",
+   "no_copy": 1,
+   "read_only_depends_on": "eval:!doc.__islocal",
+   "reqd": 1,
+   "show_description_on_click": 1,
+   "unique": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "disabled",
+   "fieldtype": "Check",
+   "label": "Disabled"
+  },
+  {
+   "fieldname": "last_fetched_commit",
+   "fieldtype": "Data",
+   "label": "Last Fetched Commit",
+   "read_only": 1
+  },
+  {
+   "fieldname": "last_fetched_at",
+   "fieldtype": "Datetime",
+   "label": "Last Fetched At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "last_synced_at",
+   "fieldtype": "Datetime",
+   "label": "Last Synced At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "last_fetch_error",
+   "fieldtype": "Small Text",
+   "label": "Last Fetch Error",
+   "read_only": 1
+  },
+  {
+   "fieldname": "last_sync_error",
+   "fieldtype": "Small Text",
+   "label": "Last Sync Error",
+   "read_only": 1
+  },
+  {
+   "fieldname": "skills",
+   "fieldtype": "Table",
+   "label": "Skills",
+   "options": "AI Skill Repo Skill"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "repository_section",
+   "fieldtype": "Section Break",
+   "label": "Repository"
+  },
+  {
+   "fieldname": "repository_column",
+   "fieldtype": "Column Break"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "identity_section",
+   "fieldtype": "Section Break",
+   "label": "Identity"
+  },
+  {
+   "fieldname": "identity_column",
+   "fieldtype": "Column Break"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "status_section",
+   "fieldtype": "Section Break",
+   "label": "Fetch & Sync Status"
+  },
+  {
+   "fieldname": "status_column",
+   "fieldtype": "Column Break"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "errors_section",
+   "fieldtype": "Section Break",
+   "label": "Last Errors"
+  },
+  {
+   "fieldname": "skills_tab",
+   "fieldtype": "Tab Break",
+   "label": "Skills"
+  },
+  {
+   "fieldname": "skills_section",
+   "fieldtype": "Section Break"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-09-22 15:10:00.000000",
+ "modified_by": "Administrator",
+ "module": "AFAA Setup",
+ "name": "AI Skill Repo",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "AI Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "rows_threshold_for_grid_search": 20,
+ "search_fields": "repo_slug,repo_url",
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "repo_slug",
+ "track_changes": 1
+}

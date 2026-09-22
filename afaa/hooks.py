@@ -104,6 +104,14 @@ export_python_type_annotations = True
 # Extension hooks for provider and credential-broker apps:
 # afaa_ai_providers = ["another_app.ai.providers.CustomProvider"]
 # afaa_provider_account_invalidated = ["another_app.credentials.invalidate_provider_account"]
+#
+# Credential seam for AI Skill Repos (afaa.ai.skill_repos). Each registered
+# callable receives (owner, repository) and returns None when it does not know
+# the repository, {"status": "public"} for anonymous access, {"status":
+# "private", "token": "<short-lived GitHub token>"} to supply credentials, or
+# {"status": "private", "reason": "<actionable message>"} when the repository
+# is known to be private but cannot be read. Tokens stay in memory.
+# afaa_skill_repo_github_credentials = ["another_app.github.skill_repo_credentials"]
 
 # Uninstallation
 # ------------
