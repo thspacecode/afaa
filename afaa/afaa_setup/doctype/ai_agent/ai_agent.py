@@ -12,6 +12,11 @@ from afaa.ai.agent_levels import (
 	AGENT_LEVELS,
 	SUB_AGENT_RUNTIME_TOOL_KEYS,
 )
+from afaa.ai.mcp import (
+	MAX_MCP_SERVERS_PER_AGENT,
+	effective_mcp_key,
+	resolve_mcp_account,
+)
 from afaa.ai.prompts import parse_json_object, validate_jinja_template
 from afaa.utils.data import validate_key
 from afaa.utils.data import validate_unique_rows as validate_distinct_rows
@@ -28,6 +33,7 @@ class AIAgent(Document):
 	if TYPE_CHECKING:
 		from frappe.types import DF
 
+		from afaa.afaa_setup.doctype.ai_agent_mcp_server.ai_agent_mcp_server import AIAgentMCPServer
 		from afaa.afaa_setup.doctype.ai_agent_skill.ai_agent_skill import AIAgentSkill
 		from afaa.afaa_setup.doctype.ai_agent_sub_agent.ai_agent_sub_agent import AIAgentSubAgent
 		from afaa.afaa_setup.doctype.ai_agent_task_assignment.ai_agent_task_assignment import (
@@ -43,6 +49,7 @@ class AIAgent(Document):
 		description: DF.SmallText | None
 		disabled: DF.Check
 		max_tokens: DF.Int
+		mcp_servers: DF.Table[AIAgentMCPServer]
 		model: DF.Link
 		model_overrides: DF.JSON | None
 		provider: DF.Link
@@ -83,6 +90,7 @@ class AIAgent(Document):
 		self.validate_unique_rows("allowed_tools", "tool", _("Allowed Tool"))
 		self.validate_unique_rows("sub_agents", "sub_agent", _("Sub Agent"))
 		self.validate_sub_agents()
+		self.validate_mcp_servers()
 		self.validate_dependencies()
 
 	def validate_agent_key(self):
@@ -165,6 +173,64 @@ class AIAgent(Document):
 				).format(frappe.bold(self.name), frappe.bold(", ".join(sorted(parents)))),
 				frappe.ValidationError,
 			)
+
+	def validate_mcp_servers(self):
+		"""Validate the (server, account) MCP attachments of one agent.
+
+		Each row expands to exactly one runtime connection: an explicit account
+		must belong to the linked server, an omitted account resolves the
+		server's single enabled default, and every derived effective key must
+		be unique so tool namespaces never collide. Level 2 (Sub Agent)
+		records cannot carry MCP servers in the v4 delegation contract.
+		"""
+		rows = self.mcp_servers or []
+		if not rows:
+			return
+		if self.agent_level == AGENT_LEVEL_SUB_AGENT:
+			frappe.throw(
+				_("Sub Agents cannot configure MCP servers."),
+				frappe.ValidationError,
+			)
+		if len(rows) > MAX_MCP_SERVERS_PER_AGENT:
+			frappe.throw(
+				_("An agent may reference at most {0} MCP servers.").format(MAX_MCP_SERVERS_PER_AGENT),
+				frappe.ValidationError,
+			)
+
+		seen_pairs: set[tuple[str, str | None]] = set()
+		effective_keys: dict[str, tuple[str, str | None]] = {}
+		for row in rows:
+			pair = (row.mcp_server, row.mcp_server_account or None)
+			if pair in seen_pairs:
+				frappe.throw(
+					_("MCP server {0} with the same account is listed more than once.").format(
+						frappe.bold(row.mcp_server)
+					)
+				)
+			seen_pairs.add(pair)
+			server = frappe.get_doc("AI MCP Server", row.mcp_server)
+			if self.disabled:
+				continue
+			if server.disabled:
+				frappe.throw(
+					_("AI MCP Server {0} is disabled.").format(frappe.bold(server.name)),
+					frappe.ValidationError,
+				)
+			account = resolve_mcp_account(server.name, row.mcp_server_account or None)
+			effective_key = effective_mcp_key(server.server_key, account.account_key, account.is_default)
+			previous = effective_keys.get(effective_key)
+			if previous is not None:
+				frappe.throw(
+					_(
+						"MCP attachment {0} collides with another attachment of this agent ({1} / {2})."
+					).format(
+						frappe.bold(effective_key),
+						frappe.bold(previous[0]),
+						frappe.bold(pair[0]),
+					),
+					frappe.ValidationError,
+				)
+			effective_keys[effective_key] = pair
 
 	def validate_unique_rows(self, table_field: str, link_field: str, label: str):
 		validate_distinct_rows(self.get(table_field), link_field, label)

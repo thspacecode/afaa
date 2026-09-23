@@ -198,6 +198,89 @@ class SubAgentAwareExternalRuntimeConfig(StructuredExternalRuntimeConfig):
 	sub_agents: tuple[ExternalSubAgent, ...] = Field(alias="subAgents", max_length=10)
 
 
+class ExternalRuntimeMCPServer(BaseModel):
+	"""One resolved (server x account) MCP connection for a schema-v5 runtime.
+
+	Porch and porch-agent see a flat, uniquely-keyed list of connections and
+	are unaware of the account layer. The bearer token is a ``SecretStr``: it
+	is redacted in public dumps and travels only inside the private
+	server-to-server payload.
+	"""
+
+	model_config = ConfigDict(frozen=True, extra="forbid", populate_by_name=True)
+
+	key: str = Field(pattern=r"^[a-z][a-z0-9_-]{2,99}$")
+	name: str = Field(min_length=1, max_length=140)
+	url: str = Field(min_length=8, max_length=1000)
+	transport: Literal["auto", "streamable_http", "sse"] = "auto"
+	allowed_tools: tuple[str, ...] = Field(default=(), alias="allowedTools", max_length=100)
+	authorization_token: SecretStr | None = Field(default=None, alias="authorizationToken")
+	connect_timeout: int = Field(alias="connectTimeout", ge=1, le=120)
+	read_timeout: int = Field(alias="readTimeout", ge=1, le=600)
+
+	@field_validator("url")
+	@classmethod
+	def validate_url(cls, value: str) -> str:
+		if any(ord(character) < 32 or ord(character) == 127 for character in value):
+			raise ValueError("MCP URL contains control characters")
+		if len(value.split()) != 1:
+			raise ValueError("MCP URL must not contain whitespace")
+		from urllib.parse import urlsplit
+
+		parts = urlsplit(value)
+		if parts.scheme != "https" or not parts.hostname:
+			raise ValueError("MCP URL must be a valid HTTPS URL")
+		if parts.username or parts.password or parts.query or parts.fragment:
+			raise ValueError("MCP URL must not embed credentials, a query string, or a fragment")
+		try:
+			port = parts.port
+		except ValueError as error:
+			raise ValueError("MCP URL has an invalid port") from error
+		if port is not None and not 1 <= port <= 65535:
+			raise ValueError("MCP URL has an invalid port")
+		return value
+
+	@field_validator("allowed_tools")
+	@classmethod
+	def validate_allowed_tools(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+		if len(value) != len(set(value)) or any(not item or len(item) > 140 for item in value):
+			raise ValueError("allowed MCP tools must be unique, non-empty, and bounded")
+		return value
+
+	@model_validator(mode="after")
+	def bearer_combination(self) -> ExternalRuntimeMCPServer:
+		if self.authorization_token is not None and not self.authorization_token.get_secret_value():
+			raise ValueError("authorization token must not be empty")
+		return self
+
+
+class MCPAwareExternalRuntimeConfig(SubAgentAwareExternalRuntimeConfig):
+	"""Schema-v5 API-key runtime contract additionally carrying MCP connections."""
+
+	model_config = ConfigDict(frozen=True, extra="forbid", populate_by_name=True)
+
+	schema_version: Literal[5] = Field(default=5, alias="schemaVersion")
+	mcp_contract_version: Literal[1] = Field(default=1, alias="mcpContractVersion")
+	mcp_servers: tuple[ExternalRuntimeMCPServer, ...] = Field(default=(), alias="mcpServers", max_length=10)
+
+	@model_validator(mode="after")
+	def unique_mcp_keys(self) -> MCPAwareExternalRuntimeConfig:
+		keys = [server.key for server in self.mcp_servers]
+		if len(keys) != len(set(keys)):
+			raise ValueError("MCP server keys must be unique")
+		return self
+
+	def private_payload(self) -> dict[str, Any]:
+		"""Serialize for a trusted machine caller, including the MCP tokens."""
+		payload = super().private_payload()
+		entries = payload.get("mcpServers") or []
+		for entry, server in zip(entries, self.mcp_servers, strict=True):
+			if server.authorization_token is None:
+				entry.pop("authorizationToken", None)
+			else:
+				entry["authorizationToken"] = server.authorization_token.get_secret_value()
+		return payload
+
 
 class CodexExternalRuntimeModel(BaseModel):
 	"""Non-secret model configuration used by a downstream credential broker."""
@@ -251,15 +334,50 @@ class SubAgentAwareCodexExternalRuntimeDescriptor(StructuredCodexExternalRuntime
 	sub_agents: tuple[ExternalSubAgent, ...] = Field(alias="subAgents", max_length=10)
 
 
+class MCPAwareCodexExternalRuntimeDescriptor(SubAgentAwareCodexExternalRuntimeDescriptor):
+	"""Schema-v5 Codex descriptor additionally carrying MCP connections.
+
+	Model credentials stay with Porch's lease broker exactly like schema v2;
+	the MCP connections ride the descriptor so Porch can embed them into the
+	inline runtime dict. Tokens are ``SecretStr`` and never appear in public
+	dumps — use :meth:`private_mcp_servers` for the trusted plaintext list.
+	"""
+
+	model_config = ConfigDict(frozen=True, extra="forbid", populate_by_name=True)
+
+	schema_version: Literal[5] = Field(default=5, alias="schemaVersion")
+	mcp_contract_version: Literal[1] = Field(default=1, alias="mcpContractVersion")
+	mcp_servers: tuple[ExternalRuntimeMCPServer, ...] = Field(default=(), alias="mcpServers", max_length=10)
+
+	@model_validator(mode="after")
+	def unique_mcp_keys(self) -> MCPAwareCodexExternalRuntimeDescriptor:
+		keys = [server.key for server in self.mcp_servers]
+		if len(keys) != len(set(keys)):
+			raise ValueError("MCP server keys must be unique")
+		return self
+
+	def private_mcp_servers(self) -> list[dict[str, Any]]:
+		"""Serialize the MCP connections with plaintext tokens for the trusted caller."""
+		entries = [server.model_dump(mode="json", by_alias=True) for server in self.mcp_servers]
+		for entry, server in zip(entries, self.mcp_servers, strict=True):
+			if server.authorization_token is None:
+				entry.pop("authorizationToken", None)
+			else:
+				entry["authorizationToken"] = server.authorization_token.get_secret_value()
+		return entries
+
+
 # Compatibility aliases for callers that group return variants as configurations.
 CodexExternalRuntimeConfig = CodexExternalRuntimeDescriptor
 ExternalRuntime = (
 	ExternalRuntimeConfig
 	| StructuredExternalRuntimeConfig
 	| SubAgentAwareExternalRuntimeConfig
+	| MCPAwareExternalRuntimeConfig
 	| CodexExternalRuntimeDescriptor
 	| StructuredCodexExternalRuntimeDescriptor
 	| SubAgentAwareCodexExternalRuntimeDescriptor
+	| MCPAwareCodexExternalRuntimeDescriptor
 )
 
 
@@ -269,6 +387,7 @@ def resolve_external_runtime(
 	*,
 	legacy_skill_instructions: bool = False,
 	include_sub_agents: bool = False,
+	include_mcp_servers: bool = False,
 ) -> ExternalRuntime:
 	"""Resolve one enabled AFAA agent for execution outside the Frappe process.
 
@@ -276,9 +395,16 @@ def resolve_external_runtime(
 	legacy contract, which flattens skill instructions into the agent instructions.
 	``include_sub_agents`` additionally resolves the Level 2 delegates of a Level 1
 	agent into a schema-v4 contract; any drifted child configuration raises so the
-	caller can degrade to the previous contract.
+	caller can degrade to the previous contract. ``include_mcp_servers`` resolves
+	the agent's MCP connections into a schema-v5 contract; MCP is administrator
+	intent and never silently dropped, so the caller must not degrade it.
 	"""
-	resolved = resolve_ai_agent(agent_name, context, include_sub_agents=include_sub_agents)
+	resolved = resolve_ai_agent(
+		agent_name,
+		context,
+		include_sub_agents=include_sub_agents,
+		include_mcp_servers=include_mcp_servers,
+	)
 	if legacy_skill_instructions:
 		instructions = _non_empty_instructions(
 			resolved.prompt, *(skill.instructions for skill in resolved.skills)
@@ -299,6 +425,10 @@ def resolve_external_runtime(
 	else:
 		sub_agents = ()
 
+	mcp_servers = (
+		build_external_mcp_servers(resolved) if (include_mcp_servers and resolved.mcp_servers) else ()
+	)
+
 	if resolved.model.provider_type == "openai_codex":
 		return resolve_codex_external_runtime(
 			resolved,
@@ -307,6 +437,7 @@ def resolve_external_runtime(
 			tools=tools,
 			legacy_skill_instructions=legacy_skill_instructions,
 			sub_agents=sub_agents,
+			mcp_servers=mcp_servers,
 		)
 	if resolved.model.provider_type not in {"openai", "google", "zai", "moonshot"}:
 		frappe.throw(
@@ -330,22 +461,80 @@ def resolve_external_runtime(
 		config_type = ExternalRuntimeConfig
 	else:
 		safe_configuration.update(_structured_payload(skills, tools))
-		if sub_agents:
-			safe_configuration["schemaVersion"] = 4
+		if sub_agents or mcp_servers:
 			safe_configuration["agentLevel"] = resolved.agent_level
 			safe_configuration["subAgents"] = tuple(
 				sub_agent.model_dump(mode="json", by_alias=True) for sub_agent in sub_agents
 			)
-			config_type = SubAgentAwareExternalRuntimeConfig
+			if mcp_servers:
+				safe_configuration["schemaVersion"] = 5
+				safe_configuration["mcpContractVersion"] = 1
+				safe_configuration["mcpServers"] = _mcp_server_payload(mcp_servers)
+				config_type = MCPAwareExternalRuntimeConfig
+			else:
+				safe_configuration["schemaVersion"] = 4
+				config_type = SubAgentAwareExternalRuntimeConfig
 		else:
 			config_type = StructuredExternalRuntimeConfig
-	return config_type.model_validate(
-		{
-			**safe_configuration,
-			"model": {**safe_configuration["model"], "apiKey": api_key},
-			"configurationFingerprint": configuration_fingerprint(safe_configuration),
-		}
-	)
+	dto_values: dict[str, Any] = {
+		**safe_configuration,
+		"model": {**safe_configuration["model"], "apiKey": api_key},
+		"configurationFingerprint": configuration_fingerprint(safe_configuration),
+	}
+	if mcp_servers:
+		# The fingerprint hashes the masked dump so token rotation cannot change
+		# it; the DTO itself carries the real secret for the private payload.
+		dto_values["mcpServers"] = _mcp_server_payload(mcp_servers, private=True)
+	return config_type.model_validate(dto_values)
+
+
+def _mcp_server_payload(
+	mcp_servers: tuple[ExternalRuntimeMCPServer, ...], *, private: bool = False
+) -> list[dict[str, Any]]:
+	"""Dump MCP connections; masked for fingerprints, plaintext for the DTO.
+
+	The masked ``authorizationToken`` keeps the configuration fingerprint
+	stable across token rotation; the private variant re-injects the real
+	secret so the validated DTO can serve ``private_payload``.
+	"""
+	entries = [server.model_dump(mode="json", by_alias=True) for server in mcp_servers]
+	if not private:
+		return entries
+	for entry, server in zip(entries, mcp_servers, strict=True):
+		if server.authorization_token is None:
+			entry.pop("authorizationToken", None)
+		else:
+			entry["authorizationToken"] = server.authorization_token.get_secret_value()
+	return entries
+
+
+def build_external_mcp_servers(resolved) -> tuple[ExternalRuntimeMCPServer, ...]:
+	"""Build the flat, uniquely-keyed MCP connection list for a schema-v5 payload."""
+	entries: list[ExternalRuntimeMCPServer] = []
+	seen: set[str] = set()
+	for server in resolved.mcp_servers:
+		if server.effective_key in seen:
+			frappe.throw(
+				_("MCP attachment {0} collides with another attachment of this agent.").format(
+					frappe.bold(server.effective_key)
+				),
+				frappe.ValidationError,
+			)
+		seen.add(server.effective_key)
+		token = server.token.get_secret_value() if server.token is not None else None
+		entries.append(
+			ExternalRuntimeMCPServer(
+				key=server.effective_key,
+				name=server.name,
+				url=server.url,
+				transport=server.transport or "auto",
+				allowedTools=server.allowed_tools,
+				authorizationToken=token,
+				connectTimeout=server.connect_timeout,
+				readTimeout=server.read_timeout,
+			)
+		)
+	return tuple(entries)
 
 
 def resolve_codex_external_runtime(
@@ -356,6 +545,7 @@ def resolve_codex_external_runtime(
 	tools: tuple[ExternalRuntimeTool, ...] = (),
 	legacy_skill_instructions: bool = True,
 	sub_agents: tuple[ExternalSubAgent, ...] = (),
+	mcp_servers: tuple[ExternalRuntimeMCPServer, ...] = (),
 ) -> CodexExternalRuntimeDescriptor:
 	"""Build a credential-free Codex descriptor without reading Token Cache passwords."""
 	from afaa.ai.oauth.openai_codex_service import CodexReconnectRequiredError
@@ -387,21 +577,29 @@ def resolve_codex_external_runtime(
 		config_type = CodexExternalRuntimeDescriptor
 	else:
 		safe_configuration.update(_structured_payload(skills, tools))
-		if sub_agents:
-			safe_configuration["schemaVersion"] = 4
+		if sub_agents or mcp_servers:
 			safe_configuration["agentLevel"] = resolved.agent_level
 			safe_configuration["subAgents"] = tuple(
 				sub_agent.model_dump(mode="json", by_alias=True) for sub_agent in sub_agents
 			)
-			config_type = SubAgentAwareCodexExternalRuntimeDescriptor
+			if mcp_servers:
+				safe_configuration["schemaVersion"] = 5
+				safe_configuration["mcpContractVersion"] = 1
+				safe_configuration["mcpServers"] = _mcp_server_payload(mcp_servers)
+				config_type = MCPAwareCodexExternalRuntimeDescriptor
+			else:
+				safe_configuration["schemaVersion"] = 4
+				config_type = SubAgentAwareCodexExternalRuntimeDescriptor
 		else:
 			config_type = StructuredCodexExternalRuntimeDescriptor
-	return config_type.model_validate(
-		{
-			**safe_configuration,
-			"configurationFingerprint": configuration_fingerprint(safe_configuration),
-		}
-	)
+	dto_values: dict[str, Any] = {
+		**safe_configuration,
+		"configurationFingerprint": configuration_fingerprint(safe_configuration),
+	}
+	if mcp_servers:
+		# Strict mode on the Codex DTOs rejects list-to-tuple coercion.
+		dto_values["mcpServers"] = tuple(_mcp_server_payload(mcp_servers, private=True))
+	return config_type.model_validate(dto_values)
 
 
 def _build_external_sub_agents(resolved) -> tuple[ExternalSubAgent, ...]:
@@ -414,7 +612,9 @@ def _build_external_sub_agents(resolved) -> tuple[ExternalSubAgent, ...]:
 	sub_agents: list[ExternalSubAgent] = []
 	for child in resolved.sub_agents:
 		model = _external_sub_agent_model(child)
-		tools = tuple(_external_sub_agent_tool(tool) for tool in sorted(child.tools, key=lambda item: item.key))
+		tools = tuple(
+			_external_sub_agent_tool(tool) for tool in sorted(child.tools, key=lambda item: item.key)
+		)
 		sub_agents.append(
 			ExternalSubAgent(
 				agentId=f"afaa:{child.key}",
@@ -474,10 +674,14 @@ def _external_sub_agent_model(child) -> ExternalSubAgentModel:
 
 		account = frappe.get_doc("AI Provider Account", child.model.provider_account)
 		if account.disabled or account.oauth_status != "Connected" or not account.connected_user:
-			raise CodexReconnectRequiredError(_("ChatGPT authorization expired; reconnect account.")) from None
+			raise CodexReconnectRequiredError(
+				_("ChatGPT authorization expired; reconnect account.")
+			) from None
 		account_id = (account.external_account_id or "").strip()
 		if not account_id:
-			raise CodexReconnectRequiredError(_("ChatGPT authorization expired; reconnect account.")) from None
+			raise CodexReconnectRequiredError(
+				_("ChatGPT authorization expired; reconnect account.")
+			) from None
 		return ExternalSubAgentModel(
 			providerType="openai_codex",
 			modelId=child.model.model_id,

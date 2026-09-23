@@ -38,6 +38,9 @@
   "sub_agents_tab",
   "sub_agents_section",
   "sub_agents",
+  "mcp_servers_tab",
+  "mcp_servers_section",
+  "mcp_servers",
   "skills_tab",
   "skills_section",
   "skills",
@@ -241,6 +244,25 @@
    "label": "Sub Agents"
   },
   {
+   "depends_on": "eval:doc.agent_level != '2'",
+   "fieldname": "mcp_servers_tab",
+   "fieldtype": "Tab Break",
+   "label": "MCP Servers"
+  },
+  {
+   "depends_on": "eval:doc.agent_level != '2'",
+   "fieldname": "mcp_servers_section",
+   "fieldtype": "Section Break"
+  },
+  {
+   "depends_on": "eval:doc.agent_level != '2'",
+   "description": "Remote MCP servers this agent may call during runs, each bound to one credential account. Level 2 (Sub Agent) records cannot configure MCP servers.",
+   "fieldname": "mcp_servers",
+   "fieldtype": "Table",
+   "label": "MCP Servers",
+   "options": "AI Agent MCP Server"
+  },
+  {
    "fieldname": "skills_tab",
    "fieldtype": "Tab Break",
    "label": "Skills"
@@ -284,7 +306,7 @@
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-09-23 09:27:28.220207",
+ "modified": "2026-09-23 07:01:00.000000",
  "modified_by": "Administrator",
  "module": "AFAA Setup",
  "name": "AI Agent",

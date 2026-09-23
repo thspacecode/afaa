@@ -5,8 +5,16 @@ from typing import Any
 
 import frappe
 from frappe import _
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, SecretStr
 
+from afaa.ai.mcp import (
+	AUTH_TYPE_BEARER,
+	AUTH_TYPE_NONE,
+	effective_mcp_key,
+	mcp_account_display_name,
+	resolve_mcp_account,
+	validate_mcp_url,
+)
 from afaa.ai.prompts import parse_json_object, render_system_prompt
 from afaa.ai.provider import get_provider_class
 
@@ -62,6 +70,30 @@ class ResolvedSubAgent(BaseModel):
 	retries: int
 
 
+class ResolvedMCPServer(BaseModel):
+	"""One resolved (server x account) MCP connection of an agent.
+
+	``effective_key`` is the model-visible namespace: the server's default
+	account keeps ``<server_key>`` and any other account becomes
+	``<server_key>-<account_key>``. The bearer token is a secret and never
+	appears in public dumps or fingerprints.
+	"""
+
+	model_config = ConfigDict(frozen=True)
+
+	server_key: str
+	account_key: str | None = None
+	effective_key: str
+	name: str
+	url: str
+	transport: str = "auto"
+	allowed_tools: tuple[str, ...] = ()
+	connect_timeout: int = 10
+	read_timeout: int = 60
+	auth_type: str = AUTH_TYPE_NONE
+	token: SecretStr | None = None
+
+
 class ResolvedOutputField(BaseModel):
 	model_config = ConfigDict(frozen=True)
 
@@ -95,13 +127,19 @@ class ResolvedAIAgent(BaseModel):
 	skills: tuple[ResolvedSkill, ...]
 	tools: tuple[ResolvedTool, ...]
 	sub_agents: tuple[ResolvedSubAgent, ...] = ()
+	mcp_servers: tuple[ResolvedMCPServer, ...] = ()
 	agent_level: str = "1"
 	timeout: float
 	retries: int
 
 
 def resolve_ai_agent(
-	agent_name: str, context=None, *, require_enabled: bool = True, include_sub_agents: bool = False
+	agent_name: str,
+	context=None,
+	*,
+	require_enabled: bool = True,
+	include_sub_agents: bool = False,
+	include_mcp_servers: bool = False,
 ) -> ResolvedAIAgent:
 	agent = frappe.get_doc("AI Agent", agent_name)
 	if require_enabled and agent.disabled:
@@ -115,6 +153,7 @@ def resolve_ai_agent(
 		if (include_sub_agents and agent_level_number(agent_level) == 1)
 		else ()
 	)
+	mcp_servers = _resolve_mcp_servers(agent, require_enabled=require_enabled) if include_mcp_servers else ()
 
 	model = frappe.get_doc("AI Model", agent.model)
 	provider = frappe.get_doc("AI Provider", model.provider)
@@ -222,6 +261,7 @@ def resolve_ai_agent(
 		skills=tuple(skills),
 		tools=tools,
 		sub_agents=tuple(sub_agents),
+		mcp_servers=tuple(mcp_servers),
 		agent_level=agent_level,
 		timeout=agent.timeout,
 		retries=agent.retries,
@@ -311,6 +351,70 @@ def _resolve_sub_agents(agent, context, *, require_enabled: bool) -> list[Resolv
 			)
 		)
 	return sub_agents
+
+
+def _resolve_mcp_servers(agent, *, require_enabled: bool) -> list[ResolvedMCPServer]:
+	"""Expand each MCP attachment row into one (server x account) connection.
+
+	Servers and accounts are revalidated on every run: a disabled or drifted
+	dependency fails closed instead of silently dropping a connection. The
+	bearer token is read from the account's encrypted password field and only
+	ever leaves the process through the private runtime payload.
+	"""
+	servers: list[ResolvedMCPServer] = []
+	effective_keys: dict[str, str] = {}
+	for row in getattr(agent, "mcp_servers", None) or []:
+		if not row.mcp_server:
+			continue
+		server = frappe.get_doc("AI MCP Server", row.mcp_server)
+		if require_enabled and server.disabled:
+			frappe.throw(
+				_("AI MCP Server {0} is disabled.").format(frappe.bold(server.name)),
+				frappe.ValidationError,
+			)
+		account = resolve_mcp_account(
+			server.name, row.mcp_server_account or None, require_enabled=require_enabled
+		)
+		effective_key = effective_mcp_key(server.server_key, account.account_key, account.is_default)
+		collision = effective_keys.get(effective_key)
+		if collision is not None:
+			frappe.throw(
+				_("MCP attachment {0} collides with attachment {1}.").format(
+					frappe.bold(effective_key), frappe.bold(collision)
+				),
+				frappe.ValidationError,
+			)
+		effective_keys[effective_key] = server.name
+
+		auth_type = account.auth_type or AUTH_TYPE_NONE
+		token: str | None = None
+		if auth_type == AUTH_TYPE_BEARER:
+			token = account.get_password("bearer_token", raise_exception=False)
+			if not token:
+				frappe.throw(
+					_("AI MCP Server Account {0} has no bearer token.").format(frappe.bold(account.name)),
+					frappe.ValidationError,
+				)
+
+		servers.append(
+			ResolvedMCPServer(
+				server_key=server.server_key,
+				account_key=account.account_key,
+				effective_key=effective_key,
+				name=mcp_account_display_name(server, account),
+				url=validate_mcp_url(server.url),
+				transport=(server.transport or "auto"),
+				allowed_tools=tuple(
+					sorted({row.tool_name for row in (server.allowed_tools or []) if row.enabled})
+				),
+				connect_timeout=int(server.connect_timeout or 10),
+				read_timeout=int(server.read_timeout or 60),
+				auth_type=auth_type,
+				token=SecretStr(token) if token else None,
+			)
+		)
+	servers.sort(key=lambda server: server.effective_key)
+	return servers
 
 
 @frappe.whitelist()
