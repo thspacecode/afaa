@@ -43,5 +43,6 @@ class AIAgentFactory(DocTypeFactory["AIAgent"]):
 			"max_tokens": 1000,
 			"tasks": [{"task": "answer-frappe-data-question"}],
 			"skills": [{"skill": "frappe-data-reader"}],
+			"skill_tags": [],
 			"allowed_tools": [{"tool": tool} for tool in read_tools],
 		}

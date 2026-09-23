@@ -41,6 +41,8 @@
   "skills_tab",
   "skills_section",
   "skills",
+  "skill_tags_section",
+  "skill_tags",
   "tools_tab",
   "tools_section",
   "allowed_tools"
@@ -265,12 +267,24 @@
    "options": "AI Provider",
    "read_only": 1,
    "reqd": 1
+  },
+  {
+   "fieldname": "skill_tags_section",
+   "fieldtype": "Section Break",
+   "label": "Skill Tags"
+  },
+  {
+   "description": "Every AI Skill carrying one of these tags is resolved automatically in addition to the skills listed above.",
+   "fieldname": "skill_tags",
+   "fieldtype": "Table MultiSelect",
+   "label": "Skill Tags",
+   "options": "AI Skill Tag Link"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-08-23 15:33:25.185450",
+ "modified": "2026-09-23 09:27:28.220207",
  "modified_by": "Administrator",
  "module": "AFAA Setup",
  "name": "AI Agent",

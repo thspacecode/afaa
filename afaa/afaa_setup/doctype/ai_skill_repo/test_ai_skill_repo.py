@@ -3,6 +3,7 @@
 
 import base64
 import hashlib
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import frappe
@@ -13,7 +14,9 @@ from afaa.ai.skill_bundles import (
 )
 from afaa.ai.skill_repos import (
 	SkillRepoHTTPError,
+	enabled_skill_tag_names,
 	fetch_skills,
+	merge_skill_tags,
 	normalize_skills_folder,
 	parse_repo_url,
 	split_skill_markdown,
@@ -155,6 +158,114 @@ class TestAISkillRepo(AFAATestSuite):
 		values.setdefault("branch", "main")
 		values.setdefault("skills_folder", "skills")
 		return frappe.get_doc({"doctype": "AI Skill Repo", **values}).insert(ignore_permissions=True)
+
+	def make_tag(self, tag_key: str, **overrides):
+		if not frappe.db.exists("AI Skill Tag", tag_key):
+			frappe.get_doc(
+				{
+					"doctype": "AI Skill Tag",
+					"tag_key": tag_key,
+					"tag_name": tag_key.replace("-", " ").title(),
+					**overrides,
+				}
+			).insert(ignore_permissions=True)
+		return tag_key
+
+	def skill_tags(self, skill_key: str) -> list[str]:
+		return sorted(
+			frappe.get_all(
+				"AI Skill Tag Link",
+				filters={"parent": skill_key, "parenttype": "AI Skill"},
+				pluck="tag",
+			)
+		)
+
+	def test_merge_skill_tags_is_additive_and_deduplicating(self):
+		self.assertEqual(
+			[row["tag"] for row in merge_skill_tags(None, ["repo", "repo2"])],
+			["repo", "repo2"],
+		)
+		existing = [SimpleNamespace(tag="manual"), SimpleNamespace(tag=None), SimpleNamespace(tag="repo")]
+		self.assertEqual(
+			[row["tag"] for row in merge_skill_tags(existing, ["repo", "manual2"])],
+			["manual", "repo", "manual2"],
+			"existing tags keep their order and repo tags are appended once",
+		)
+		self.assertEqual(merge_skill_tags(existing, []), [{"tag": "manual"}, {"tag": "repo"}])
+		self.assertEqual(merge_skill_tags([], []), [])
+
+	def test_enabled_skill_tag_names_skips_disabled_and_duplicates(self):
+		enabled = self.make_tag("enabled-sync-tag")
+		disabled = self.make_tag("disabled-sync-tag", disabled=1)
+		rows = [
+			SimpleNamespace(tag=enabled),
+			SimpleNamespace(tag=disabled),
+			SimpleNamespace(tag=enabled),
+			SimpleNamespace(tag=None),
+		]
+		self.assertEqual(enabled_skill_tag_names(rows), ["enabled-sync-tag"])
+		self.assertEqual(enabled_skill_tag_names(None), [])
+
+	def test_sync_merges_repo_tags_and_never_removes_manual_tags(self):
+		_fake, repository = self.fake_github()
+		self.serve_default_fetch(repository)
+		first_tag = self.make_tag("synced-repo-tag")
+		manual_tag = self.make_tag("manual-skill-tag")
+		repo = self.make_repo(repo_slug="tagged-repo", tags=[{"tag": first_tag}])
+		fetch_skills(repo.name)
+
+		created = sync_skills(repo.name)
+
+		self.assertEqual(created["counts"], {"created": 2, "updated": 0, "unchanged": 0, "skipped": 0})
+		self.assertEqual(self.skill_tags("tagged-repo-code-style"), ["synced-repo-tag"])
+
+		# A manually added tag survives re-sync of identical upstream content.
+		skill = frappe.get_doc("AI Skill", "tagged-repo-code-style")
+		skill.append("tags", {"tag": manual_tag})
+		skill.save(ignore_permissions=True)
+		unchanged = sync_skills(repo.name)
+		self.assertEqual(unchanged["counts"]["unchanged"], 2)
+		self.assertEqual(self.skill_tags("tagged-repo-code-style"), ["manual-skill-tag", "synced-repo-tag"])
+
+		# A new repo tag is merged in without touching the manual one.
+		second_tag = self.make_tag("second-synced-tag")
+		repo = frappe.get_doc("AI Skill Repo", repo.name)
+		repo.append("tags", {"tag": second_tag})
+		repo.save(ignore_permissions=True)
+		updated = sync_skills(repo.name)
+		outcomes = {item["skill"]: item["status"] for item in updated["results"]}
+		self.assertEqual(outcomes["code-style"], "updated", "a tag-only diff still reports updated")
+		self.assertEqual(
+			self.skill_tags("tagged-repo-code-style"),
+			["manual-skill-tag", "second-synced-tag", "synced-repo-tag"],
+		)
+
+		# Removing a repo tag never strips it from skills that already carry it.
+		repo = frappe.get_doc("AI Skill Repo", repo.name)
+		repo.tags = [row for row in repo.tags if row.tag == second_tag]
+		repo.save(ignore_permissions=True)
+		sync_skills(repo.name)
+		self.assertEqual(
+			self.skill_tags("tagged-repo-code-style"),
+			["manual-skill-tag", "second-synced-tag", "synced-repo-tag"],
+		)
+
+	def test_sync_ignores_disabled_repo_tags(self):
+		_fake, repository = self.fake_github()
+		self.serve_default_fetch(repository)
+		disabled_tag = self.make_tag("disabled-repo-tag", disabled=1)
+		repo = self.make_repo(repo_slug="disabled-tag-repo", tags=[{"tag": disabled_tag}])
+		fetch_skills(repo.name)
+
+		result = sync_skills(repo.name)
+
+		self.assertEqual(result["counts"]["created"], 2)
+		self.assertEqual(self.skill_tags("disabled-tag-repo-code-style"), [])
+
+	def test_repo_rejects_duplicate_tags(self):
+		tag = self.make_tag("duplicate-repo-tag")
+		with self.assertRaisesRegex(frappe.ValidationError, "listed more than once"):
+			self.make_repo(repo_slug="dupe-tag-repo", tags=[{"tag": tag}, {"tag": tag}])
 
 	def fake_github(self):
 		fake = FakeGitHub()

@@ -5,7 +5,7 @@ import frappe
 from frappe import _
 from frappe.model.document import Document
 
-from afaa.utils.data import validate_key
+from afaa.utils.data import validate_key, validate_unique_rows
 
 
 class AISkillRepo(Document):
@@ -18,6 +18,7 @@ class AISkillRepo(Document):
 		from frappe.types import DF
 
 		from afaa.afaa_setup.doctype.ai_skill_repo_skill.ai_skill_repo_skill import AISkillRepoSkill
+		from afaa.afaa_setup.doctype.ai_skill_tag_link.ai_skill_tag_link import AISkillTagLink
 
 		branch: DF.Data | None
 		disabled: DF.Check
@@ -30,6 +31,7 @@ class AISkillRepo(Document):
 		repo_url: DF.Data
 		skills: DF.Table[AISkillRepoSkill]
 		skills_folder: DF.Data
+		tags: DF.TableMultiSelect[AISkillTagLink]
 	# end: auto-generated types
 
 	def validate(self):
@@ -47,3 +49,4 @@ class AISkillRepo(Document):
 			branch = parsed.ref
 		self.branch = branch or None
 		self.skills_folder = normalize_skills_folder(self.skills_folder)
+		validate_unique_rows(self.tags, "tag", _("Skill Tag"))

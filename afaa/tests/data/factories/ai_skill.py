@@ -21,6 +21,7 @@ class AISkillFactory(DocTypeFactory["AISkill"]):
 				"Use list and count for collections and get-doc for a known record. "
 				"Never invent field names or record values."
 			),
+			"tags": [],
 			"required_tools": [
 				{"tool": "frappe_get_doctype_schema"},
 				{"tool": "frappe_get_list"},

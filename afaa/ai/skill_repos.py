@@ -164,6 +164,41 @@ def derive_skill_key(repo_slug: str, folder_name: str) -> str:
 	return f"{repo_slug}-{slugify_skill_segment(folder_name)}"
 
 
+def merge_skill_tags(existing_rows, repo_tag_names) -> list[dict[str, str | None]]:
+	"""Merge repository tags into a skill's existing tag rows.
+
+	The merge is additive only: manually added tags survive and tags are never
+	removed, so removing a repository tag does not strip it from skills that
+	already carry it. Row order preserves the skill's own tags first, then the
+	new repository tags in their configured order.
+	"""
+	merged: list[dict[str, str | None]] = []
+	seen: set[str] = set()
+	for row in existing_rows or []:
+		tag = getattr(row, "tag", None)
+		if not tag or tag in seen:
+			continue
+		seen.add(tag)
+		merged.append({"tag": tag})
+	for tag in repo_tag_names or []:
+		if not tag or tag in seen:
+			continue
+		seen.add(tag)
+		merged.append({"tag": tag})
+	return merged
+
+
+def enabled_skill_tag_names(rows) -> list[str]:
+	"""Return the tag names of one tag child table, excluding disabled tags."""
+	tag_names = [row.tag for row in (rows or []) if getattr(row, "tag", None)]
+	if not tag_names:
+		return []
+	disabled = set(
+		frappe.get_all("AI Skill Tag", filters={"name": ("in", tag_names), "disabled": 1}, pluck="name")
+	)
+	return [tag for tag in dict.fromkeys(tag_names) if tag not in disabled]
+
+
 def split_skill_markdown(content: bytes) -> tuple[str | None, str | None, str] | None:
 	"""Split SKILL.md bytes into (name, description, instructions).
 
@@ -526,8 +561,11 @@ def _sync_one(
 	entries: tuple[TreeEntry, ...],
 	pinned_commit: str,
 	limits,
+	repo_tag_names: list[str] | None = None,
 ) -> tuple[str, str | None]:
 	from afaa.ai.skill_bundles import validate_relative_path_limits
+
+	repo_tag_names = repo_tag_names or []
 
 	folder_name = (row.skill_folder or "").strip()
 	if not folder_name:
@@ -604,6 +642,7 @@ def _sync_one(
 				"skill_name": name_value,
 				"description": description,
 				"instructions": instructions,
+				"tags": [{"tag": tag} for tag in repo_tag_names],
 			}
 		)
 		skill_doc.insert()
@@ -612,6 +651,9 @@ def _sync_one(
 		skill_doc.skill_name = name_value
 		skill_doc.description = description
 		skill_doc.instructions = instructions
+		merged_tag_rows = merge_skill_tags(skill_doc.tags, repo_tag_names)
+		if [row["tag"] for row in merged_tag_rows] != [row.tag for row in (skill_doc.tags or [])]:
+			skill_doc.set("tags", merged_tag_rows)
 
 	if created:
 		current_folders, current_files = [], []
@@ -626,10 +668,22 @@ def _sync_one(
 			"AI Skill", skill_key, ["skill_name", "description", "instructions"], as_dict=True
 		)
 	)
+	stored_tags = (
+		[]
+		if created
+		else frappe.get_all(
+			"AI Skill Tag Link",
+			filters={"parent": skill_key, "parenttype": "AI Skill", "parentfield": "tags"},
+			pluck="tag",
+			order_by=None,
+		)
+	)
+	desired_tag_names = [row.tag for row in (skill_doc.get("tags") or [])]
 	unchanged_fields = bool(stored) and (
 		stored.skill_name == name_value
 		and (stored.description or None) == description
 		and (stored.instructions or "") == instructions
+		and sorted(stored_tags) == sorted(desired_tag_names)
 	)
 
 	if unchanged_bundle and unchanged_fields:
@@ -686,6 +740,7 @@ def sync_repo_skills(doc) -> dict[str, Any]:
 		raise
 	entries = fetch_tree_entries(parsed, credential, tree_sha)
 	limits = get_skill_bundle_limits()
+	repo_tag_names = enabled_skill_tag_names(getattr(doc, "tags", None))
 
 	results: list[dict[str, Any]] = []
 	seen_keys: set[str] = set()
@@ -704,7 +759,9 @@ def sync_repo_skills(doc) -> dict[str, Any]:
 		savepoint = f"afaa_skill_repo_{frappe.generate_hash(length=10)}"
 		frappe.db.savepoint(savepoint)
 		try:
-			status, reason = _sync_one(doc, row, parsed, credential, entries, pinned_commit, limits)
+			status, reason = _sync_one(
+				doc, row, parsed, credential, entries, pinned_commit, limits, repo_tag_names
+			)
 		except Exception as error:
 			frappe.db.rollback(savepoint=savepoint)
 			row.ai_skill, row.synced_commit = previous_ai_skill, previous_commit
