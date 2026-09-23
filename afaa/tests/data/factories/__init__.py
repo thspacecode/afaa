@@ -3,6 +3,7 @@ from .ai_model import AIModelFactory
 from .ai_provider import AIProviderFactory
 from .ai_provider_account import AIProviderAccountFactory
 from .ai_skill import AISkillFactory
+from .ai_skill_tag import AISkillTagFactory
 from .ai_task_definition import AITaskDefinitionFactory
 from .base import DocTypeFactory
 
@@ -12,6 +13,7 @@ __all__ = [
 	"AIProviderAccountFactory",
 	"AIProviderFactory",
 	"AISkillFactory",
+	"AISkillTagFactory",
 	"AITaskDefinitionFactory",
 	"DocTypeFactory",
 ]

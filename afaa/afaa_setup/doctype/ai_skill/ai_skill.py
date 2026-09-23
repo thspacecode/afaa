@@ -5,7 +5,7 @@ import frappe
 from frappe import _
 from frappe.model.document import Document
 
-from afaa.utils.data import validate_key
+from afaa.utils.data import validate_key, validate_unique_rows
 
 
 class AISkill(Document):
@@ -17,6 +17,7 @@ class AISkill(Document):
 	if TYPE_CHECKING:
 		from frappe.types import DF
 
+		from afaa.afaa_setup.doctype.ai_skill_tag_link.ai_skill_tag_link import AISkillTagLink
 		from afaa.afaa_setup.doctype.ai_skill_tool.ai_skill_tool import AISkillTool
 
 		description: DF.SmallText | None
@@ -25,6 +26,7 @@ class AISkill(Document):
 		required_tools: DF.Table[AISkillTool]
 		skill_key: DF.Data
 		skill_name: DF.Data
+		tags: DF.TableMultiSelect[AISkillTagLink]
 	# end: auto-generated types
 
 	def validate(self):
@@ -32,6 +34,7 @@ class AISkill(Document):
 		stored_key = None if self.is_new() else frappe.db.get_value(self.doctype, self.name, "skill_key")
 		if stored_key and stored_key != self.skill_key:
 			frappe.throw(_("Skill Key cannot be changed after creation."), frappe.PermissionError)
+		validate_unique_rows(self.tags, "tag", _("Skill Tag"))
 		self.validate_tools()
 
 	def after_insert(self):

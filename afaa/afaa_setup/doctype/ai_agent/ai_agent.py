@@ -7,13 +7,14 @@ from frappe.model.document import Document
 from frappe.utils import cint, flt
 
 from afaa.ai.agent_levels import (
-	AGENT_LEVELS,
 	AGENT_LEVEL_SUB_AGENT,
 	AGENT_LEVEL_WORKER,
+	AGENT_LEVELS,
 	SUB_AGENT_RUNTIME_TOOL_KEYS,
 )
 from afaa.ai.prompts import parse_json_object, validate_jinja_template
 from afaa.utils.data import validate_key
+from afaa.utils.data import validate_unique_rows as validate_distinct_rows
 
 MAX_SUB_AGENTS_PER_PARENT = 10
 
@@ -33,9 +34,10 @@ class AIAgent(Document):
 			AIAgentTaskAssignment,
 		)
 		from afaa.afaa_setup.doctype.ai_agent_tool.ai_agent_tool import AIAgentTool
+		from afaa.afaa_setup.doctype.ai_skill_tag_link.ai_skill_tag_link import AISkillTagLink
 
 		agent_key: DF.Data
-		agent_level: DF.Literal["0", "1", "2"]
+		agent_level: DF.Literal["", "0", "1", "2"]
 		agent_name: DF.Data
 		allowed_tools: DF.Table[AIAgentTool]
 		description: DF.SmallText | None
@@ -46,6 +48,7 @@ class AIAgent(Document):
 		provider: DF.Link
 		provider_account: DF.Link
 		retries: DF.Int
+		skill_tags: DF.TableMultiSelect[AISkillTagLink]
 		skills: DF.Table[AIAgentSkill]
 		sub_agents: DF.Table[AIAgentSubAgent]
 		system_prompt: DF.Code
@@ -76,6 +79,7 @@ class AIAgent(Document):
 
 		self.validate_unique_rows("tasks", "task", _("Task Definition"))
 		self.validate_unique_rows("skills", "skill", _("Skill"))
+		self.validate_unique_rows("skill_tags", "tag", _("Skill Tag"))
 		self.validate_unique_rows("allowed_tools", "tool", _("Allowed Tool"))
 		self.validate_unique_rows("sub_agents", "sub_agent", _("Sub Agent"))
 		self.validate_sub_agents()
@@ -156,19 +160,14 @@ class AIAgent(Document):
 				pluck="parent",
 			)
 			frappe.throw(
-				_("AI Agent {0} is referenced as a sub-agent by {1}. Remove the reference before trashing.").format(
-					frappe.bold(self.name), frappe.bold(", ".join(sorted(parents)))
-				),
+				_(
+					"AI Agent {0} is referenced as a sub-agent by {1}. Remove the reference before trashing."
+				).format(frappe.bold(self.name), frappe.bold(", ".join(sorted(parents)))),
 				frappe.ValidationError,
 			)
 
 	def validate_unique_rows(self, table_field: str, link_field: str, label: str):
-		seen = set()
-		for row in self.get(table_field):
-			value = row.get(link_field)
-			if value in seen:
-				frappe.throw(_("{0} {1} is listed more than once.").format(label, frappe.bold(value)))
-			seen.add(value)
+		validate_distinct_rows(self.get(table_field), link_field, label)
 
 	def validate_dependencies(self):
 		model = frappe.get_doc("AI Model", self.model)
@@ -200,9 +199,7 @@ class AIAgent(Document):
 				frappe.ValidationError,
 			)
 		for tool_name in sorted(runtime_tool_keys):
-			runtime_tool = frappe.db.get_value(
-				"AI Tool", tool_name, ["disabled", "available"], as_dict=True
-			)
+			runtime_tool = frappe.db.get_value("AI Tool", tool_name, ["disabled", "available"], as_dict=True)
 			if not runtime_tool or runtime_tool.disabled or not runtime_tool.available:
 				frappe.throw(_("AI Tool {0} is disabled or unavailable.").format(frappe.bold(tool_name)))
 		registered_tools = allowed_tools - SUB_AGENT_RUNTIME_TOOL_KEYS

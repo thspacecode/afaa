@@ -110,9 +110,11 @@ def resolve_ai_agent(
 	from afaa.ai.agent_levels import AGENT_LEVEL_WORKER, agent_level_number
 
 	agent_level = (getattr(agent, "agent_level", None) or AGENT_LEVEL_WORKER).strip()
-	sub_agents = _resolve_sub_agents(agent, context, require_enabled=require_enabled) if (
-		include_sub_agents and agent_level_number(agent_level) == 1
-	) else ()
+	sub_agents = (
+		_resolve_sub_agents(agent, context, require_enabled=require_enabled)
+		if (include_sub_agents and agent_level_number(agent_level) == 1)
+		else ()
+	)
 
 	model = frappe.get_doc("AI Model", agent.model)
 	provider = frappe.get_doc("AI Provider", model.provider)
@@ -173,8 +175,8 @@ def resolve_ai_agent(
 		)
 
 	skills = []
-	for row in agent.skills:
-		skill = frappe.get_doc("AI Skill", row.skill)
+	for skill_name in _agent_skill_names(agent):
+		skill = frappe.get_doc("AI Skill", skill_name)
 		if require_enabled and skill.disabled:
 			frappe.throw(_("AI Skill {0} is disabled.").format(frappe.bold(skill.name)))
 
@@ -226,6 +228,44 @@ def resolve_ai_agent(
 	)
 
 
+def _agent_skill_names(agent) -> list[str]:
+	"""Effective skill documents of one agent: explicit rows, then tag expansion.
+
+	The agent's effective skill set is the union of its explicit ``AI Agent
+	Skill`` rows (in row order) and every ``AI Skill`` carrying one of the
+	agent's selected tags, deduplicated, with tag-derived skills appended in
+	deterministic key order. Tags never mutate the agent's explicit rows, and
+	disabled tags resolve to nothing. Per-skill guards (disabled skills,
+	required tools vs allowed tools) are applied by the caller.
+	"""
+	explicit_names: list[str] = []
+	seen: set[str] = set()
+	for row in getattr(agent, "skills", None) or []:
+		if row.skill and row.skill not in seen:
+			seen.add(row.skill)
+			explicit_names.append(row.skill)
+
+	tag_names = [row.tag for row in (getattr(agent, "skill_tags", None) or []) if row.tag]
+	if not tag_names:
+		return explicit_names
+
+	disabled_tags = set(
+		frappe.get_all("AI Skill Tag", filters={"name": ("in", tag_names), "disabled": 1}, pluck="name")
+	)
+	active_tags = [tag for tag in dict.fromkeys(tag_names) if tag not in disabled_tags]
+	if not active_tags:
+		return explicit_names
+
+	tagged_skills = set(
+		frappe.get_all(
+			"AI Skill Tag Link",
+			filters={"parenttype": "AI Skill", "tag": ("in", active_tags)},
+			pluck="parent",
+		)
+	)
+	return explicit_names + sorted(tagged_skills - seen)
+
+
 def _resolve_sub_agents(agent, context, *, require_enabled: bool) -> list[ResolvedSubAgent]:
 	"""Resolve each configured Level 2 delegate of one Level 1 agent.
 
@@ -271,7 +311,6 @@ def _resolve_sub_agents(agent, context, *, require_enabled: bool) -> list[Resolv
 			)
 		)
 	return sub_agents
-
 
 
 @frappe.whitelist()

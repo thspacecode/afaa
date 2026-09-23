@@ -32,3 +32,33 @@ class TestAISkill(AFAATestSuite):
 					],
 				}
 			).insert()
+
+	def test_accepts_multiple_distinct_tags_and_rejects_duplicates(self):
+		suffix = frappe.generate_hash(length=8).lower()
+		for tag_key in ("tag-one-probe", "tag-two-probe"):
+			if not frappe.db.exists("AI Skill Tag", tag_key):
+				frappe.get_doc(
+					{
+						"doctype": "AI Skill Tag",
+						"tag_key": tag_key,
+						"tag_name": tag_key.replace("-", " ").title(),
+					}
+				).insert(ignore_permissions=True)
+
+		skill = frappe.get_doc(
+			{
+				"doctype": "AI Skill",
+				"skill_name": f"Tagged Skill {suffix}",
+				"skill_key": f"tagged-skill-{suffix}",
+				"instructions": "Use the configured tools.",
+				"tags": [{"tag": "tag-one-probe"}, {"tag": "tag-two-probe"}],
+			}
+		).insert(ignore_permissions=True)
+		self.assertEqual(
+			[row.tag for row in frappe.get_doc("AI Skill", skill.name).tags],
+			["tag-one-probe", "tag-two-probe"],
+		)
+
+		with self.assertRaisesRegex(frappe.ValidationError, "listed more than once"):
+			skill.append("tags", {"tag": "tag-one-probe"})
+			skill.save(ignore_permissions=True)
