@@ -1,0 +1,155 @@
+{
+ "actions": [],
+ "allow_bulk_edit": 1,
+ "allow_rename": 1,
+ "autoname": "format:{mcp_server}-{account_key}",
+ "creation": "2026-09-23 12:29:41.068362",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "disabled_section",
+  "disabled",
+  "identity_section",
+  "account_name",
+  "identity_column",
+  "mcp_server",
+  "account_key",
+  "credentials_section",
+  "auth_type",
+  "credentials_column",
+  "bearer_token",
+  "is_default_section",
+  "is_default"
+ ],
+ "fields": [
+  {
+   "fieldname": "disabled_section",
+   "fieldtype": "Section Break",
+   "label": "Availability"
+  },
+  {
+   "default": "0",
+   "fieldname": "disabled",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Disabled"
+  },
+  {
+   "fieldname": "identity_section",
+   "fieldtype": "Section Break",
+   "label": "Identity"
+  },
+  {
+   "fieldname": "account_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Account Name",
+   "reqd": 1
+  },
+  {
+   "fieldname": "identity_column",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Immutable after creation.",
+   "fieldname": "mcp_server",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "MCP Server",
+   "options": "AI MCP Server",
+   "reqd": 1
+  },
+  {
+   "description": "Immutable key unique per server. A non-default account extends the tool namespace to -.",
+   "fieldname": "account_key",
+   "fieldtype": "Data",
+   "label": "Account Key",
+   "reqd": 1
+  },
+  {
+   "fieldname": "credentials_section",
+   "fieldtype": "Section Break",
+   "label": "Credentials"
+  },
+  {
+   "default": "none",
+   "fieldname": "auth_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Authentication",
+   "options": "\nnone\nbearer_token",
+   "reqd": 1
+  },
+  {
+   "fieldname": "credentials_column",
+   "fieldtype": "Column Break"
+  },
+  {
+   "depends_on": "eval:doc.auth_type == 'bearer_token'",
+   "description": "Stored encrypted. Sent only over the trusted server-to-server runtime path.",
+   "fieldname": "bearer_token",
+   "fieldtype": "Password",
+   "label": "Bearer Token",
+   "length": 4096,
+   "mandatory_depends_on": "eval:doc.auth_type == 'bearer_token'"
+  },
+  {
+   "fieldname": "is_default_section",
+   "fieldtype": "Section Break",
+   "label": "Default Binding"
+  },
+  {
+   "default": "0",
+   "description": "Exactly one enabled default account per server. The default account keeps the plain  tool namespace.",
+   "fieldname": "is_default",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Is Default Account"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-09-23 12:29:41.068362",
+ "modified_by": "Administrator",
+ "module": "AFAA Setup",
+ "name": "AI MCP Server Account",
+ "naming_rule": "Expression (old style)",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "AI Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "rows_threshold_for_grid_search": 20,
+ "search_fields": "account_name,mcp_server,is_default",
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "account_name",
+ "track_changes": 1
+}
