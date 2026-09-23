@@ -6,3 +6,5 @@
 # Patches added in this section will be executed after doctypes are migrated
 afaa.afaa_setup.patches.provision_openai_codex_connected_app
 afaa.afaa_setup.patches.initialize_ai_skill_bundle_roots
+afaa.afaa_setup.patches.backfill_ai_agent_level
+afaa.afaa_setup.patches.provision_sub_agent_runtime_tools

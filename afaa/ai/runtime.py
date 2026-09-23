@@ -44,6 +44,24 @@ class ResolvedSkill(BaseModel):
 	required_tools: tuple[str, ...]
 
 
+class ResolvedSubAgent(BaseModel):
+	"""One configured Level 2 delegate of a Level 1 agent."""
+
+	model_config = ConfigDict(frozen=True)
+
+	name: str
+	key: str
+	description: str | None
+	prompt: str
+	model: ResolvedModel
+	tools: tuple[ResolvedTool, ...]
+	skills: tuple[ResolvedSkill, ...] = ()
+	max_calls: int | None = None
+	timeout_seconds: float | None = None
+	timeout: float
+	retries: int
+
+
 class ResolvedOutputField(BaseModel):
 	model_config = ConfigDict(frozen=True)
 
@@ -76,14 +94,25 @@ class ResolvedAIAgent(BaseModel):
 	tasks: tuple[ResolvedTask, ...]
 	skills: tuple[ResolvedSkill, ...]
 	tools: tuple[ResolvedTool, ...]
+	sub_agents: tuple[ResolvedSubAgent, ...] = ()
+	agent_level: str = "1"
 	timeout: float
 	retries: int
 
 
-def resolve_ai_agent(agent_name: str, context=None, *, require_enabled: bool = True) -> ResolvedAIAgent:
+def resolve_ai_agent(
+	agent_name: str, context=None, *, require_enabled: bool = True, include_sub_agents: bool = False
+) -> ResolvedAIAgent:
 	agent = frappe.get_doc("AI Agent", agent_name)
 	if require_enabled and agent.disabled:
 		frappe.throw(_("AI Agent {0} is disabled.").format(frappe.bold(agent.name)))
+
+	from afaa.ai.agent_levels import AGENT_LEVEL_WORKER, agent_level_number
+
+	agent_level = (getattr(agent, "agent_level", None) or AGENT_LEVEL_WORKER).strip()
+	sub_agents = _resolve_sub_agents(agent, context, require_enabled=require_enabled) if (
+		include_sub_agents and agent_level_number(agent_level) == 1
+	) else ()
 
 	model = frappe.get_doc("AI Model", agent.model)
 	provider = frappe.get_doc("AI Provider", model.provider)
@@ -190,9 +219,59 @@ def resolve_ai_agent(agent_name: str, context=None, *, require_enabled: bool = T
 		tasks=tuple(tasks),
 		skills=tuple(skills),
 		tools=tools,
+		sub_agents=tuple(sub_agents),
+		agent_level=agent_level,
 		timeout=agent.timeout,
 		retries=agent.retries,
 	)
+
+
+def _resolve_sub_agents(agent, context, *, require_enabled: bool) -> list[ResolvedSubAgent]:
+	"""Resolve each configured Level 2 delegate of one Level 1 agent.
+
+	Any drifted, disabled, or misconfigured child fails closed so callers can
+	degrade the whole delegation contract rather than silently dropping it.
+	"""
+	from afaa.ai.agent_levels import AGENT_LEVEL_WORKER, agent_level_number
+
+	sub_agents: list[ResolvedSubAgent] = []
+	for row in getattr(agent, "sub_agents", None) or []:
+		if not row.sub_agent:
+			continue
+		if row.sub_agent == agent.name:
+			frappe.throw(
+				_("AI Agent {0} cannot delegate to itself.").format(frappe.bold(agent.name)),
+				frappe.ValidationError,
+			)
+		child = frappe.get_doc("AI Agent", row.sub_agent)
+		child_level = (getattr(child, "agent_level", None) or AGENT_LEVEL_WORKER).strip()
+		if agent_level_number(child_level) != 2:
+			frappe.throw(
+				_("{0} is not a Sub Agent (Agent Level 2).").format(frappe.bold(child.name)),
+				frappe.ValidationError,
+			)
+		resolved_child = resolve_ai_agent(
+			row.sub_agent, context, require_enabled=require_enabled, include_sub_agents=False
+		)
+		max_calls = int(row.max_calls or 0)
+		timeout_seconds = float(row.timeout_seconds or 0)
+		sub_agents.append(
+			ResolvedSubAgent(
+				name=child.agent_name,
+				key=child.agent_key,
+				description=child.description or None,
+				prompt=resolved_child.prompt,
+				model=resolved_child.model,
+				tools=resolved_child.tools,
+				skills=resolved_child.skills,
+				max_calls=max_calls if max_calls > 0 else None,
+				timeout_seconds=timeout_seconds if timeout_seconds > 0 else None,
+				timeout=resolved_child.timeout,
+				retries=resolved_child.retries,
+			)
+		)
+	return sub_agents
+
 
 
 @frappe.whitelist()

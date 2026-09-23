@@ -77,10 +77,13 @@ def sync_registered_tools() -> dict[str, list[str]]:
 	definitions = _get_registered_tools()
 	report = {"created": [], "updated": [], "unavailable": []}
 
+	from afaa.ai.agent_levels import SUB_AGENT_RUNTIME_TOOL_KEYS
+
 	for name in frappe.get_all("AI Tool", pluck="name"):
-		if name not in definitions:
-			frappe.db.set_value("AI Tool", name, {"available": 0, "disabled": 1}, update_modified=False)
-			report["unavailable"].append(name)
+		if name in SUB_AGENT_RUNTIME_TOOL_KEYS or name in definitions:
+			continue
+		frappe.db.set_value("AI Tool", name, {"available": 0, "disabled": 1}, update_modified=False)
+		report["unavailable"].append(name)
 
 	for definition in definitions.values():
 		values = {
