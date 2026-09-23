@@ -13,6 +13,7 @@
   "agent_name",
   "identity_column",
   "agent_key",
+  "agent_level",
   "description_section",
   "description",
   "system_prompt_section",
@@ -34,6 +35,9 @@
   "tasks_tab",
   "tasks_section",
   "tasks",
+  "sub_agents_tab",
+  "sub_agents_section",
+  "sub_agents",
   "skills_tab",
   "skills_section",
   "skills",
@@ -48,6 +52,16 @@
    "in_list_view": 1,
    "label": "Agent Name",
    "reqd": 1
+  },
+  {
+   "default": "1",
+   "description": "Agent hierarchy level: 0 = Supervisor (control plane), 1 = Worker (default, thread main + delegation parent), 2 = Sub Agent (delegate of exactly one Worker).",
+   "fieldname": "agent_level",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Agent Level",
+   "options": "\n0\n1\n2"
   },
   {
    "description": "Stable routing key, using lowercase letters, numbers, underscores, or hyphens.",
@@ -170,6 +184,20 @@
    "options": "AI Agent Task Assignment"
   },
   {
+   "depends_on": "eval:doc.agent_level == '1'",
+   "fieldname": "sub_agents_section",
+   "fieldtype": "Section Break",
+   "label": "Sub Agents"
+  },
+  {
+   "depends_on": "eval:doc.agent_level == '1'",
+   "description": "Scoped delegates this Worker Agent may call through the delegate_task tool during a run. Only Worker Agents may delegate, and each sub-agent belongs to exactly one parent.",
+   "fieldname": "sub_agents",
+   "fieldtype": "Table",
+   "label": "Sub Agents",
+   "options": "AI Agent Sub Agent"
+  },
+  {
    "fieldname": "disabled_section",
    "fieldtype": "Section Break"
   },
@@ -203,6 +231,12 @@
    "fieldname": "tasks_tab",
    "fieldtype": "Tab Break",
    "label": "Task Definitions"
+  },
+  {
+   "depends_on": "eval:doc.agent_level == '1'",
+   "fieldname": "sub_agents_tab",
+   "fieldtype": "Tab Break",
+   "label": "Sub Agents"
   },
   {
    "fieldname": "skills_tab",

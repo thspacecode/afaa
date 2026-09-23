@@ -117,6 +117,88 @@ class StructuredExternalRuntimeConfig(ExternalRuntimeConfig):
 	tools: tuple[ExternalRuntimeTool, ...] = Field(max_length=100)
 
 
+class ExternalSubAgentTool(BaseModel):
+	"""One tool advertised to a sub-agent, marked runtime-implemented or proxied."""
+
+	model_config = ConfigDict(frozen=True, extra="forbid", populate_by_name=True)
+
+	key: str = Field(pattern=r"^[a-z0-9][a-z0-9_-]{0,139}$")
+	name: str = Field(min_length=1, max_length=140)
+	description: str = Field(min_length=1, max_length=10_000)
+	input_schema: dict[str, Any] = Field(alias="inputSchema")
+	output_schema: dict[str, Any] = Field(alias="outputSchema")
+	runtime: bool = False
+
+
+class ExternalSubAgentModel(BaseModel):
+	"""Credential-free model descriptor for one sub-agent.
+
+	Porch embeds each sub-agent's API key or issues a Codex credential lease;
+	afaa never touches secrets here.
+	"""
+
+	model_config = ConfigDict(frozen=True, extra="forbid", populate_by_name=True)
+
+	provider_type: Literal["openai", "google", "zai", "moonshot", "openai_codex"] = Field(
+		alias="providerType"
+	)
+	model_id: str = Field(alias="modelId", min_length=1, max_length=255)
+	settings: dict[str, Any]
+	timeout: float = Field(ge=1, le=3600)
+	retries: int = Field(ge=0, le=10)
+	base_url: str | None = Field(default=None, alias="baseUrl", max_length=512)
+	provider_account: str | None = Field(default=None, alias="providerAccount", max_length=140)
+	account_id: str | None = Field(default=None, alias="accountId", max_length=255)
+
+	@field_validator("base_url")
+	@classmethod
+	def validate_base_url(cls, value: str | None) -> str | None:
+		if value is None:
+			return None
+		if any(ord(character) < 32 or ord(character) == 127 for character in value):
+			raise ValueError("base URL contains control characters")
+		if not value.startswith("https://") or len(value.split()) != 1:
+			raise ValueError("base URL must be a valid HTTPS URL without whitespace")
+		return value
+
+	@model_validator(mode="after")
+	def codex_binds_a_provider_account(self) -> ExternalSubAgentModel:
+		if self.provider_type == "openai_codex":
+			if not self.provider_account or not self.account_id:
+				raise ValueError("Codex sub-agents require a provider account binding")
+		elif self.provider_account is not None or self.account_id is not None:
+			raise ValueError("API-key sub-agents cannot carry provider account bindings")
+		return self
+
+
+class ExternalSubAgent(BaseModel):
+	"""One credential-free sub-agent descriptor for a schema-v4 runtime."""
+
+	model_config = ConfigDict(frozen=True, extra="forbid", populate_by_name=True)
+
+	agent_id: str = Field(alias="agentId", pattern=r"^afaa:[a-z0-9][a-z0-9_-]{0,139}$")
+	name: str = Field(min_length=1, max_length=140)
+	delegate_name: str = Field(alias="delegateName", min_length=1, max_length=140)
+	description: str | None = Field(default=None, max_length=10_000)
+	instructions: tuple[str, ...] = Field(max_length=100)
+	model: ExternalSubAgentModel
+	tools: tuple[ExternalSubAgentTool, ...] = Field(max_length=100)
+	skills: tuple[ExternalRuntimeSkill, ...] = Field(default=(), max_length=100)
+	max_calls: int | None = Field(default=None, alias="maxCalls", ge=1, le=1000)
+	timeout_seconds: float | None = Field(default=None, alias="timeoutSeconds", ge=1, le=86400)
+
+
+class SubAgentAwareExternalRuntimeConfig(StructuredExternalRuntimeConfig):
+	"""Schema-v4 API-key runtime contract carrying Level 2 sub-agent descriptors."""
+
+	model_config = ConfigDict(frozen=True, extra="forbid", populate_by_name=True)
+
+	schema_version: Literal[4] = Field(default=4, alias="schemaVersion")
+	agent_level: Literal["0", "1", "2"] = Field(default="1", alias="agentLevel")
+	sub_agents: tuple[ExternalSubAgent, ...] = Field(alias="subAgents", max_length=10)
+
+
+
 class CodexExternalRuntimeModel(BaseModel):
 	"""Non-secret model configuration used by a downstream credential broker."""
 
@@ -159,13 +241,25 @@ class StructuredCodexExternalRuntimeDescriptor(CodexExternalRuntimeDescriptor):
 	tools: tuple[ExternalRuntimeTool, ...] = Field(max_length=100)
 
 
+class SubAgentAwareCodexExternalRuntimeDescriptor(StructuredCodexExternalRuntimeDescriptor):
+	"""Schema-v4 Codex descriptor carrying Level 2 sub-agent descriptors."""
+
+	model_config = ConfigDict(frozen=True, extra="forbid", populate_by_name=True)
+
+	schema_version: Literal[4] = Field(default=4, alias="schemaVersion")
+	agent_level: Literal["0", "1", "2"] = Field(default="1", alias="agentLevel")
+	sub_agents: tuple[ExternalSubAgent, ...] = Field(alias="subAgents", max_length=10)
+
+
 # Compatibility aliases for callers that group return variants as configurations.
 CodexExternalRuntimeConfig = CodexExternalRuntimeDescriptor
 ExternalRuntime = (
 	ExternalRuntimeConfig
 	| StructuredExternalRuntimeConfig
+	| SubAgentAwareExternalRuntimeConfig
 	| CodexExternalRuntimeDescriptor
 	| StructuredCodexExternalRuntimeDescriptor
+	| SubAgentAwareCodexExternalRuntimeDescriptor
 )
 
 
@@ -174,13 +268,17 @@ def resolve_external_runtime(
 	context=None,
 	*,
 	legacy_skill_instructions: bool = False,
+	include_sub_agents: bool = False,
 ) -> ExternalRuntime:
 	"""Resolve one enabled AFAA agent for execution outside the Frappe process.
 
 	Structured skills are the default. Existing threads may explicitly request the
 	legacy contract, which flattens skill instructions into the agent instructions.
+	``include_sub_agents`` additionally resolves the Level 2 delegates of a Level 1
+	agent into a schema-v4 contract; any drifted child configuration raises so the
+	caller can degrade to the previous contract.
 	"""
-	resolved = resolve_ai_agent(agent_name, context)
+	resolved = resolve_ai_agent(agent_name, context, include_sub_agents=include_sub_agents)
 	if legacy_skill_instructions:
 		instructions = _non_empty_instructions(
 			resolved.prompt, *(skill.instructions for skill in resolved.skills)
@@ -191,6 +289,16 @@ def resolve_external_runtime(
 		instructions = _non_empty_instructions(resolved.prompt)
 		skills, tools = build_structured_runtime_capabilities(resolved)
 
+	if include_sub_agents and resolved.sub_agents:
+		if legacy_skill_instructions:
+			frappe.throw(
+				_("Sub-agent contracts require the structured runtime contract."),
+				frappe.ValidationError,
+			)
+		sub_agents = _build_external_sub_agents(resolved)
+	else:
+		sub_agents = ()
+
 	if resolved.model.provider_type == "openai_codex":
 		return resolve_codex_external_runtime(
 			resolved,
@@ -198,6 +306,7 @@ def resolve_external_runtime(
 			skills=skills,
 			tools=tools,
 			legacy_skill_instructions=legacy_skill_instructions,
+			sub_agents=sub_agents,
 		)
 	if resolved.model.provider_type not in {"openai", "google", "zai", "moonshot"}:
 		frappe.throw(
@@ -221,7 +330,15 @@ def resolve_external_runtime(
 		config_type = ExternalRuntimeConfig
 	else:
 		safe_configuration.update(_structured_payload(skills, tools))
-		config_type = StructuredExternalRuntimeConfig
+		if sub_agents:
+			safe_configuration["schemaVersion"] = 4
+			safe_configuration["agentLevel"] = resolved.agent_level
+			safe_configuration["subAgents"] = tuple(
+				sub_agent.model_dump(mode="json", by_alias=True) for sub_agent in sub_agents
+			)
+			config_type = SubAgentAwareExternalRuntimeConfig
+		else:
+			config_type = StructuredExternalRuntimeConfig
 	return config_type.model_validate(
 		{
 			**safe_configuration,
@@ -238,6 +355,7 @@ def resolve_codex_external_runtime(
 	skills: tuple[ExternalRuntimeSkill, ...] = (),
 	tools: tuple[ExternalRuntimeTool, ...] = (),
 	legacy_skill_instructions: bool = True,
+	sub_agents: tuple[ExternalSubAgent, ...] = (),
 ) -> CodexExternalRuntimeDescriptor:
 	"""Build a credential-free Codex descriptor without reading Token Cache passwords."""
 	from afaa.ai.oauth.openai_codex_service import CodexReconnectRequiredError
@@ -269,12 +387,169 @@ def resolve_codex_external_runtime(
 		config_type = CodexExternalRuntimeDescriptor
 	else:
 		safe_configuration.update(_structured_payload(skills, tools))
-		config_type = StructuredCodexExternalRuntimeDescriptor
+		if sub_agents:
+			safe_configuration["schemaVersion"] = 4
+			safe_configuration["agentLevel"] = resolved.agent_level
+			safe_configuration["subAgents"] = tuple(
+				sub_agent.model_dump(mode="json", by_alias=True) for sub_agent in sub_agents
+			)
+			config_type = SubAgentAwareCodexExternalRuntimeDescriptor
+		else:
+			config_type = StructuredCodexExternalRuntimeDescriptor
 	return config_type.model_validate(
 		{
 			**safe_configuration,
 			"configurationFingerprint": configuration_fingerprint(safe_configuration),
 		}
+	)
+
+
+def _build_external_sub_agents(resolved) -> tuple[ExternalSubAgent, ...]:
+	"""Build credential-free Level 2 descriptors from resolved delegates.
+
+	Each child carries its own model, tools, and skills. API-key children keep the secret
+	with Porch; Codex children bind their provider account so Porch can issue one
+	credential lease per child. Any drift fails closed.
+	"""
+	sub_agents: list[ExternalSubAgent] = []
+	for child in resolved.sub_agents:
+		model = _external_sub_agent_model(child)
+		tools = tuple(_external_sub_agent_tool(tool) for tool in sorted(child.tools, key=lambda item: item.key))
+		sub_agents.append(
+			ExternalSubAgent(
+				agentId=f"afaa:{child.key}",
+				name=child.name,
+				delegateName=child.name,
+				description=child.description,
+				instructions=_non_empty_instructions(child.prompt),
+				model=model,
+				tools=tools,
+				skills=build_sub_agent_skill_capabilities(child),
+				maxCalls=child.max_calls,
+				timeoutSeconds=child.timeout_seconds,
+			)
+		)
+	return tuple(sub_agents)
+
+
+def build_sub_agent_skill_capabilities(child) -> tuple[ExternalRuntimeSkill, ...]:
+	"""Build deterministic credential-free skill DTOs for one resolved delegate.
+
+	Unlike the parent path, a delegate's skills may require the reserved
+	runtime tool keys (``read_file`` & co.) as long as the child advertises
+	them; a required tool the child does not allow fails closed so the whole
+	contract degrades instead of silently widening the child's toolset.
+	"""
+	tool_keys = {tool.key for tool in child.tools}
+	skills = []
+	for skill in sorted(child.skills, key=lambda item: item.key):
+		required_tools = tuple(sorted(set(skill.required_tools)))
+		unsupported = set(required_tools) - tool_keys
+		if unsupported:
+			frappe.throw(
+				_("AI Skill {0} requires tools not allowed by sub-agent {1}: {2}").format(
+					frappe.bold(skill.name), frappe.bold(child.name), ", ".join(sorted(unsupported))
+				),
+				frappe.ValidationError,
+			)
+		snapshot = {
+			"key": skill.key,
+			"name": skill.name,
+			"description": skill.description or None,
+			"instructions": skill.instructions,
+			"requiredTools": required_tools,
+		}
+		skills.append(
+			ExternalRuntimeSkill.model_validate(
+				{**snapshot, "fingerprint": configuration_fingerprint(snapshot)}
+			)
+		)
+	return tuple(skills)
+
+
+def _external_sub_agent_model(child) -> ExternalSubAgentModel:
+	"""Resolve one delegate's own model descriptor, credential-free."""
+	if child.model.provider_type == "openai_codex":
+		from afaa.ai.oauth.openai_codex_service import CodexReconnectRequiredError
+
+		account = frappe.get_doc("AI Provider Account", child.model.provider_account)
+		if account.disabled or account.oauth_status != "Connected" or not account.connected_user:
+			raise CodexReconnectRequiredError(_("ChatGPT authorization expired; reconnect account.")) from None
+		account_id = (account.external_account_id or "").strip()
+		if not account_id:
+			raise CodexReconnectRequiredError(_("ChatGPT authorization expired; reconnect account.")) from None
+		return ExternalSubAgentModel(
+			providerType="openai_codex",
+			modelId=child.model.model_id,
+			settings={**child.model.settings, "openai_store": False},
+			timeout=child.timeout,
+			retries=child.retries,
+			providerAccount=account.name,
+			accountId=account_id,
+		)
+	if child.model.provider_type not in {"openai", "google", "zai", "moonshot"}:
+		frappe.throw(
+			_("AI provider type {0} is not supported by sub-agents.").format(
+				frappe.bold(child.model.provider_type)
+			),
+			frappe.ValidationError,
+		)
+	base_url = (child.model.base_url or "").strip() or None
+	# API-key children stay credential-free and unbound: Porch re-resolves the
+	# child agent through its Space allowlist (which returns the provider
+	# account) and embeds the key itself, exactly like the parent path.
+	return ExternalSubAgentModel(
+		providerType=child.model.provider_type,
+		modelId=child.model.model_id,
+		settings=dict(child.model.settings),
+		timeout=child.timeout,
+		retries=child.retries,
+		baseUrl=base_url,
+	)
+
+
+def _external_sub_agent_tool(tool) -> ExternalSubAgentTool:
+	"""Classify one delegate tool as runtime-implemented or Frappe-proxied."""
+	from afaa.ai.agent_levels import runtime_tool_definition
+
+	runtime_definition = runtime_tool_definition(tool.key)
+	if runtime_definition is not None:
+		if tool.method != runtime_definition["method"] or tool.key != runtime_definition["tool_name"]:
+			frappe.throw(
+				_("AI Tool {0} no longer matches the reserved sub-agent runtime tool.").format(
+					frappe.bold(tool.key)
+				),
+				frappe.ValidationError,
+			)
+		return ExternalSubAgentTool(
+			key=tool.key,
+			name=tool.name,
+			description=tool.description,
+			inputSchema=tool.input_schema,
+			outputSchema=tool.output_schema,
+			runtime=True,
+		)
+
+	expected_method = EXTERNAL_READ_TOOL_METHODS.get(tool.key)
+	definition = get_tool_definition(tool.key) if expected_method else None
+	if (
+		not expected_method
+		or not definition
+		or definition.key != tool.key
+		or definition.method != expected_method
+		or tool.method != expected_method
+	):
+		frappe.throw(
+			_("AI Tool {0} is not an approved tool for sub-agents.").format(frappe.bold(tool.key)),
+			frappe.ValidationError,
+		)
+	return ExternalSubAgentTool(
+		key=tool.key,
+		name=tool.name,
+		description=tool.description,
+		inputSchema=tool.input_schema,
+		outputSchema=tool.output_schema,
+		runtime=False,
 	)
 
 
