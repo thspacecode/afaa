@@ -168,17 +168,12 @@ class AIAgent(Document):
 		Each row expands to exactly one runtime connection: an explicit account
 		must belong to the linked server, an omitted account resolves the
 		server's single enabled default, and every derived effective key must
-		be unique so tool namespaces never collide. Level 2 (Sub Agent)
-		records cannot carry MCP servers in the v4 delegation contract.
+		be unique so tool namespaces never collide. Level 2 agents use the same
+		validation because schema v5 delegates carry their own MCP connections.
 		"""
 		rows = self.mcp_servers or []
 		if not rows:
 			return
-		if self.agent_level == AGENT_LEVEL_SUB_AGENT:
-			frappe.throw(
-				_("Sub Agents cannot configure MCP servers."),
-				frappe.ValidationError,
-			)
 		if len(rows) > MAX_MCP_SERVERS_PER_AGENT:
 			frappe.throw(
 				_("An agent may reference at most {0} MCP servers.").format(MAX_MCP_SERVERS_PER_AGENT),

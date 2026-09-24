@@ -254,6 +254,27 @@ class ExternalRuntimeMCPServer(BaseModel):
 		return self
 
 
+class ExternalMCPSubAgent(ExternalSubAgent):
+	"""Schema-v5 delegate descriptor carrying its own MCP connections."""
+
+	mcp_servers: tuple[ExternalRuntimeMCPServer, ...] = Field(
+		default=(), alias="mcpServers", max_length=10
+	)
+
+	@model_validator(mode="after")
+	def unique_mcp_keys(self) -> ExternalMCPSubAgent:
+		keys = [server.key for server in self.mcp_servers]
+		if len(keys) != len(set(keys)):
+			raise ValueError("sub-agent MCP server keys must be unique")
+		return self
+
+	def private_payload(self) -> dict[str, Any]:
+		"""Serialize the delegate with plaintext MCP tokens for Porch only."""
+		payload = self.model_dump(mode="json", by_alias=True)
+		payload["mcpServers"] = _mcp_server_payload(self.mcp_servers, private=True)
+		return payload
+
+
 class MCPAwareExternalRuntimeConfig(SubAgentAwareExternalRuntimeConfig):
 	"""Schema-v5 API-key runtime contract additionally carrying MCP connections."""
 
@@ -261,6 +282,7 @@ class MCPAwareExternalRuntimeConfig(SubAgentAwareExternalRuntimeConfig):
 
 	schema_version: Literal[5] = Field(default=5, alias="schemaVersion")
 	mcp_contract_version: Literal[1] = Field(default=1, alias="mcpContractVersion")
+	sub_agents: tuple[ExternalMCPSubAgent, ...] = Field(alias="subAgents", max_length=10)
 	mcp_servers: tuple[ExternalRuntimeMCPServer, ...] = Field(default=(), alias="mcpServers", max_length=10)
 
 	@model_validator(mode="after")
@@ -271,14 +293,10 @@ class MCPAwareExternalRuntimeConfig(SubAgentAwareExternalRuntimeConfig):
 		return self
 
 	def private_payload(self) -> dict[str, Any]:
-		"""Serialize for a trusted machine caller, including the MCP tokens."""
+		"""Serialize for a trusted machine caller, including all MCP tokens."""
 		payload = super().private_payload()
-		entries = payload.get("mcpServers") or []
-		for entry, server in zip(entries, self.mcp_servers, strict=True):
-			if server.authorization_token is None:
-				entry.pop("authorizationToken", None)
-			else:
-				entry["authorizationToken"] = server.authorization_token.get_secret_value()
+		payload["mcpServers"] = _mcp_server_payload(self.mcp_servers, private=True)
+		payload["subAgents"] = [child.private_payload() for child in self.sub_agents]
 		return payload
 
 
@@ -347,6 +365,7 @@ class MCPAwareCodexExternalRuntimeDescriptor(SubAgentAwareCodexExternalRuntimeDe
 
 	schema_version: Literal[5] = Field(default=5, alias="schemaVersion")
 	mcp_contract_version: Literal[1] = Field(default=1, alias="mcpContractVersion")
+	sub_agents: tuple[ExternalMCPSubAgent, ...] = Field(alias="subAgents", max_length=10)
 	mcp_servers: tuple[ExternalRuntimeMCPServer, ...] = Field(default=(), alias="mcpServers", max_length=10)
 
 	@model_validator(mode="after")
@@ -357,14 +376,12 @@ class MCPAwareCodexExternalRuntimeDescriptor(SubAgentAwareCodexExternalRuntimeDe
 		return self
 
 	def private_mcp_servers(self) -> list[dict[str, Any]]:
-		"""Serialize the MCP connections with plaintext tokens for the trusted caller."""
-		entries = [server.model_dump(mode="json", by_alias=True) for server in self.mcp_servers]
-		for entry, server in zip(entries, self.mcp_servers, strict=True):
-			if server.authorization_token is None:
-				entry.pop("authorizationToken", None)
-			else:
-				entry["authorizationToken"] = server.authorization_token.get_secret_value()
-		return entries
+		"""Serialize the parent MCP connections with plaintext tokens."""
+		return _mcp_server_payload(self.mcp_servers, private=True)
+
+	def private_sub_agents(self) -> list[dict[str, Any]]:
+		"""Serialize delegates with their plaintext MCP tokens for Porch only."""
+		return [child.private_payload() for child in self.sub_agents]
 
 
 # Compatibility aliases for callers that group return variants as configurations.
@@ -428,6 +445,9 @@ def resolve_external_runtime(
 	mcp_servers = (
 		build_external_mcp_servers(resolved) if (include_mcp_servers and resolved.mcp_servers) else ()
 	)
+	delegates_have_mcp = any(
+		getattr(child, "mcp_servers", ()) for child in sub_agents
+	)
 
 	if resolved.model.provider_type == "openai_codex":
 		return resolve_codex_external_runtime(
@@ -466,7 +486,7 @@ def resolve_external_runtime(
 			safe_configuration["subAgents"] = tuple(
 				sub_agent.model_dump(mode="json", by_alias=True) for sub_agent in sub_agents
 			)
-			if mcp_servers:
+			if mcp_servers or delegates_have_mcp:
 				safe_configuration["schemaVersion"] = 5
 				safe_configuration["mcpContractVersion"] = 1
 				safe_configuration["mcpServers"] = _mcp_server_payload(mcp_servers)
@@ -485,6 +505,11 @@ def resolve_external_runtime(
 		# The fingerprint hashes the masked dump so token rotation cannot change
 		# it; the DTO itself carries the real secret for the private payload.
 		dto_values["mcpServers"] = _mcp_server_payload(mcp_servers, private=True)
+	if delegates_have_mcp:
+		dto_values["subAgents"] = tuple(
+			child.private_payload() if isinstance(child, ExternalMCPSubAgent) else child.model_dump(mode="json", by_alias=True)
+			for child in sub_agents
+		)
 	return config_type.model_validate(dto_values)
 
 
@@ -573,6 +598,9 @@ def resolve_codex_external_runtime(
 		},
 	}
 	config_type: type[CodexExternalRuntimeDescriptor]
+	delegates_have_mcp = any(
+		getattr(child, "mcp_servers", ()) for child in sub_agents
+	)
 	if legacy_skill_instructions:
 		config_type = CodexExternalRuntimeDescriptor
 	else:
@@ -582,7 +610,7 @@ def resolve_codex_external_runtime(
 			safe_configuration["subAgents"] = tuple(
 				sub_agent.model_dump(mode="json", by_alias=True) for sub_agent in sub_agents
 			)
-			if mcp_servers:
+			if mcp_servers or delegates_have_mcp:
 				safe_configuration["schemaVersion"] = 5
 				safe_configuration["mcpContractVersion"] = 1
 				safe_configuration["mcpServers"] = _mcp_server_payload(mcp_servers)
@@ -599,6 +627,11 @@ def resolve_codex_external_runtime(
 	if mcp_servers:
 		# Strict mode on the Codex DTOs rejects list-to-tuple coercion.
 		dto_values["mcpServers"] = tuple(_mcp_server_payload(mcp_servers, private=True))
+	if delegates_have_mcp:
+		dto_values["subAgents"] = tuple(
+			child.private_payload() if isinstance(child, ExternalMCPSubAgent) else child.model_dump(mode="json", by_alias=True)
+			for child in sub_agents
+		)
 	return config_type.model_validate(dto_values)
 
 
@@ -615,20 +648,25 @@ def _build_external_sub_agents(resolved) -> tuple[ExternalSubAgent, ...]:
 		tools = tuple(
 			_external_sub_agent_tool(tool) for tool in sorted(child.tools, key=lambda item: item.key)
 		)
-		sub_agents.append(
-			ExternalSubAgent(
-				agentId=f"afaa:{child.key}",
-				name=child.name,
-				delegateName=child.name,
-				description=child.description,
-				instructions=_non_empty_instructions(child.prompt),
-				model=model,
-				tools=tools,
-				skills=build_sub_agent_skill_capabilities(child),
-				maxCalls=child.max_calls,
-				timeoutSeconds=child.timeout_seconds,
+		values = {
+			"agentId": f"afaa:{child.key}",
+			"name": child.name,
+			"delegateName": child.name,
+			"description": child.description,
+			"instructions": _non_empty_instructions(child.prompt),
+			"model": model,
+			"tools": tools,
+			"skills": build_sub_agent_skill_capabilities(child),
+			"maxCalls": child.max_calls,
+			"timeoutSeconds": child.timeout_seconds,
+		}
+		child_mcp_servers = build_external_mcp_servers(child) if child.mcp_servers else ()
+		if child_mcp_servers:
+			sub_agents.append(
+				ExternalMCPSubAgent(**values, mcpServers=child_mcp_servers)
 			)
-		)
+		else:
+			sub_agents.append(ExternalSubAgent(**values))
 	return tuple(sub_agents)
 
 

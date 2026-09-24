@@ -64,6 +64,7 @@ class ResolvedSubAgent(BaseModel):
 	model: ResolvedModel
 	tools: tuple[ResolvedTool, ...]
 	skills: tuple[ResolvedSkill, ...] = ()
+	mcp_servers: tuple[ResolvedMCPServer, ...] = ()
 	max_calls: int | None = None
 	timeout_seconds: float | None = None
 	timeout: float
@@ -149,7 +150,12 @@ def resolve_ai_agent(
 
 	agent_level = (getattr(agent, "agent_level", None) or AGENT_LEVEL_WORKER).strip()
 	sub_agents = (
-		_resolve_sub_agents(agent, context, require_enabled=require_enabled)
+		_resolve_sub_agents(
+			agent,
+			context,
+			require_enabled=require_enabled,
+			include_mcp_servers=include_mcp_servers,
+		)
 		if (include_sub_agents and agent_level_number(agent_level) == 1)
 		else ()
 	)
@@ -306,7 +312,13 @@ def _agent_skill_names(agent) -> list[str]:
 	return explicit_names + sorted(tagged_skills - seen)
 
 
-def _resolve_sub_agents(agent, context, *, require_enabled: bool) -> list[ResolvedSubAgent]:
+def _resolve_sub_agents(
+	agent,
+	context,
+	*,
+	require_enabled: bool,
+	include_mcp_servers: bool = False,
+) -> list[ResolvedSubAgent]:
 	"""Resolve each configured Level 2 delegate of one Level 1 agent.
 
 	Any drifted, disabled, or misconfigured child fails closed so callers can
@@ -331,7 +343,11 @@ def _resolve_sub_agents(agent, context, *, require_enabled: bool) -> list[Resolv
 				frappe.ValidationError,
 			)
 		resolved_child = resolve_ai_agent(
-			row.sub_agent, context, require_enabled=require_enabled, include_sub_agents=False
+			row.sub_agent,
+			context,
+			require_enabled=require_enabled,
+			include_sub_agents=False,
+			include_mcp_servers=include_mcp_servers,
 		)
 		max_calls = int(row.max_calls or 0)
 		timeout_seconds = float(row.timeout_seconds or 0)
@@ -344,6 +360,7 @@ def _resolve_sub_agents(agent, context, *, require_enabled: bool) -> list[Resolv
 				model=resolved_child.model,
 				tools=resolved_child.tools,
 				skills=resolved_child.skills,
+				mcp_servers=resolved_child.mcp_servers,
 				max_calls=max_calls if max_calls > 0 else None,
 				timeout_seconds=timeout_seconds if timeout_seconds > 0 else None,
 				timeout=resolved_child.timeout,

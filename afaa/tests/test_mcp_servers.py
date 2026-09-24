@@ -245,15 +245,14 @@ class TestAIAgentMCPAttachment(MCPTestMixin, AFAATestSuite):
 		agent.append("mcp_servers", {"mcp_server": figma_acme.name})
 		self.assertRaises(frappe.ValidationError, agent.save)
 
-	def test_level_two_agents_cannot_configure_mcp(self):
+	def test_level_two_agents_can_configure_mcp(self):
 		server = self.make_server()
 		self.make_account(server, is_default=1)
-		self.assertRaises(
-			frappe.ValidationError,
-			self.make_agent,
+		agent = self.make_agent(
 			mcp_rows=[{"mcp_server": server.name}],
 			agent_level="2",
 		)
+		self.assertEqual(agent.mcp_servers[0].mcp_server, server.name)
 
 	def test_attachment_limit_is_enforced(self):
 		server = self.make_server()
@@ -365,6 +364,39 @@ class TestExternalRuntimeSchemaV5(MCPTestMixin, AFAATestSuite):
 		private = config.private_payload()
 		tokens = [entry.get("authorizationToken") for entry in private["mcpServers"]]
 		self.assertEqual(sorted(tokens), ["secret-token", "secret-token"])
+
+	def test_level_two_delegate_carries_its_own_private_mcp_connection(self):
+		server = self.make_server(server_key=_unique("delegate"))
+		self.make_account(server, account_key="default", is_default=1)
+		child = self.make_agent(
+			agent_name="MCP Delegate",
+			agent_level="2",
+			mcp_rows=[{"mcp_server": server.name}],
+		)
+		parent = self.make_agent(
+			agent_name="MCP Parent",
+			sub_agents=[{"sub_agent": child.name}],
+		)
+
+		config = resolve_external_runtime(
+			parent.agent_key,
+			include_sub_agents=True,
+			include_mcp_servers=True,
+		)
+
+		self.assertIsInstance(config, MCPAwareExternalRuntimeConfig)
+		self.assertEqual(config.mcp_servers, ())
+		self.assertEqual(config.sub_agents[0].mcp_servers[0].key, server.server_key)
+		public = config.model_dump(mode="json", by_alias=True)
+		self.assertEqual(
+			public["subAgents"][0]["mcpServers"][0]["authorizationToken"],
+			"**********",
+		)
+		private = config.private_payload()
+		self.assertEqual(
+			private["subAgents"][0]["mcpServers"][0]["authorizationToken"],
+			"secret-token",
+		)
 
 	def test_v5_fingerprint_is_token_rotation_stable(self):
 		agent, server = self.make_mcp_agent()
