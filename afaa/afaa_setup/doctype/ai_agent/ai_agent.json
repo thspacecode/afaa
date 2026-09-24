@@ -244,19 +244,16 @@
    "label": "Sub Agents"
   },
   {
-   "depends_on": "eval:doc.agent_level != '2'",
    "fieldname": "mcp_servers_tab",
    "fieldtype": "Tab Break",
    "label": "MCP Servers"
   },
   {
-   "depends_on": "eval:doc.agent_level != '2'",
    "fieldname": "mcp_servers_section",
    "fieldtype": "Section Break"
   },
   {
-   "depends_on": "eval:doc.agent_level != '2'",
-   "description": "Remote MCP servers this agent may call during runs, each bound to one credential account. Level 2 (Sub Agent) records cannot configure MCP servers.",
+   "description": "Remote MCP servers this agent may call during runs, each bound to one credential account. Sub Agents receive their own attachments when delegated.",
    "fieldname": "mcp_servers",
    "fieldtype": "Table",
    "label": "MCP Servers",
