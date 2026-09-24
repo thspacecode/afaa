@@ -60,7 +60,7 @@
   },
   {
    "default": "1",
-   "description": "Agent hierarchy level: 0 = Supervisor (control plane), 1 = Worker (default, thread main + delegation parent), 2 = Sub Agent (delegate of exactly one Worker).",
+   "description": "Agent hierarchy level: 0 = Supervisor (control plane), 1 = Worker (default, thread main + delegation parent), 2 = Sub Agent (reusable delegate of Worker Agents).",
    "fieldname": "agent_level",
    "fieldtype": "Select",
    "in_list_view": 1,
@@ -196,7 +196,7 @@
   },
   {
    "depends_on": "eval:doc.agent_level == '1'",
-   "description": "Scoped delegates this Worker Agent may call through the delegate_task tool during a run. Only Worker Agents may delegate, and each sub-agent belongs to exactly one parent.",
+   "description": "Scoped delegates this Worker Agent may call through the delegate_task tool during a run. Only Worker Agents may delegate; the same sub-agent may be referenced by multiple Worker Agents.",
    "fieldname": "sub_agents",
    "fieldtype": "Table",
    "label": "Sub Agents",

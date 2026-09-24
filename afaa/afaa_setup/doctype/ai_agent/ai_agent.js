@@ -4,26 +4,6 @@
 const WORKER_LEVEL = "1";
 const SUB_AGENT_LEVEL = "2";
 
-function load_taken_sub_agents(frm) {
-	// Sub-agents belong to exactly one parent: exclude every Level 2 agent
-	// already referenced by another AI Agent from the picker.
-	return frappe.db
-		.get_list("AI Agent Sub Agent", {
-			filters: { parenttype: "AI Agent" },
-			fields: ["sub_agent", "parent"],
-			limit_page_length: 0,
-		})
-		.then((rows) => {
-			frm.taken_sub_agents = rows
-				.filter((row) => row.parent !== frm.doc.name)
-				.map((row) => row.sub_agent)
-				.filter(Boolean);
-		})
-		.catch(() => {
-			frm.taken_sub_agents = [];
-		});
-}
-
 frappe.ui.form.on("AI Agent", {
 	setup(frm) {
 		frm.set_query("model", () => ({ filters: { available: 1 } }));
@@ -43,10 +23,6 @@ frappe.ui.form.on("AI Agent", {
 			if (frm.doc.name) {
 				filters.push(["name", "!=", frm.doc.name]);
 			}
-			const taken = frm.taken_sub_agents || [];
-			if (taken.length) {
-				filters.push(["name", "not in", taken]);
-			}
 			return { filters };
 		});
 	},
@@ -57,7 +33,6 @@ frappe.ui.form.on("AI Agent", {
 
 	refresh(frm) {
 		frm.last_agent_level = frm.doc.agent_level || WORKER_LEVEL;
-		void load_taken_sub_agents(frm);
 
 		if (frm.is_new()) return;
 

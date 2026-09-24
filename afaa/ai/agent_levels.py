@@ -8,7 +8,7 @@ The hierarchy has three levels:
 - Level 0 — Supervisor Agent: durable task orchestration (control plane only).
 - Level 1 — Worker Agent: primary coding/review agents; the only level that may
   be selected as a thread's main agent and the only level that may delegate.
-- Level 2 — Sub Agent: scoped in-process delegates of exactly one Level 1 agent.
+- Level 2 — Sub Agent: reusable in-process delegates referenced by Level 1 agents.
 """
 
 from __future__ import annotations
@@ -60,7 +60,6 @@ def _runtime_tool_definitions() -> dict[str, dict]:
 		"type": ["string", "null"],
 		"description": "Authorized workspace service name. Omit to use the default.",
 	}
-	text = {"type": "string"}
 	return {
 		"read_file": {
 			"tool_name": "read_file",
@@ -177,7 +176,6 @@ def runtime_tool_definition(tool_key: str) -> dict | None:
 	if tool_key not in SUB_AGENT_RUNTIME_TOOL_KEYS:
 		return None
 	return _runtime_tool_definitions()[tool_key]
-
 
 
 def agent_level_number(level: str | None) -> int:

@@ -13,7 +13,7 @@
  ],
  "fields": [
   {
-   "description": "A Level 2 (Sub Agent) AI Agent this Worker Agent may delegate to. A sub-agent can be referenced by exactly one parent.",
+   "description": "A Level 2 (Sub Agent) AI Agent this Worker Agent may delegate to. A sub-agent may be shared by multiple Worker Agents.",
    "fieldname": "sub_agent",
    "fieldtype": "Link",
    "in_list_view": 1,

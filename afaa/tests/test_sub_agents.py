@@ -10,8 +10,8 @@ from frappe.tests.utils import FrappeTestCase
 
 from afaa.ai.agent_levels import AGENT_LEVEL_SUB_AGENT, AGENT_LEVEL_WORKER
 from afaa.ai.external_runtime import (
-	SubAgentAwareExternalRuntimeConfig,
 	StructuredExternalRuntimeConfig,
+	SubAgentAwareExternalRuntimeConfig,
 	build_sub_agent_skill_capabilities,
 	configuration_fingerprint,
 	resolve_external_runtime,
@@ -20,9 +20,9 @@ from afaa.ai.runtime import resolve_ai_agent
 from afaa.tests.data.factories import (
 	AIAgentFactory,
 	AIModelFactory,
-	AISkillFactory,
 	AIProviderAccountFactory,
 	AIProviderFactory,
+	AISkillFactory,
 )
 
 
@@ -78,7 +78,9 @@ class TestSubAgentHierarchy(FrappeTestCase):
 
 	def test_worker_may_reference_enabled_level_two_sub_agents(self):
 		child = self.make_child()
-		parent = self.make_agent(sub_agents=[{"sub_agent": child.name, "max_calls": 3, "timeout_seconds": 120}])
+		parent = self.make_agent(
+			sub_agents=[{"sub_agent": child.name, "max_calls": 3, "timeout_seconds": 120}]
+		)
 		self.assertEqual(parent.sub_agents[0].sub_agent, child.name)
 		self.assertEqual(parent.sub_agents[0].max_calls, 3)
 		self.assertEqual(parent.sub_agents[0].timeout_seconds, 120)
@@ -109,14 +111,23 @@ class TestSubAgentHierarchy(FrappeTestCase):
 			other.append("sub_agents", {"sub_agent": child.name})
 			other.save()
 
-	def test_level_two_agent_is_single_parented_and_trash_blocked(self):
+	def test_level_two_agent_may_be_shared_and_trash_requires_all_references_removed(self):
 		child = self.make_child()
-		parent = self.make_agent(sub_agents=[{"sub_agent": child.name}])
+		first_parent = self.make_agent(sub_agents=[{"sub_agent": child.name}])
+		second_parent = self.make_agent(sub_agents=[{"sub_agent": child.name}])
+
+		self.assertEqual(first_parent.sub_agents[0].sub_agent, child.name)
+		self.assertEqual(second_parent.sub_agents[0].sub_agent, child.name)
 		with self.assertRaises(frappe.ValidationError):
 			child.delete()
 
-		parent.sub_agents = []
-		parent.save()
+		first_parent.sub_agents = []
+		first_parent.save()
+		with self.assertRaises(frappe.ValidationError):
+			child.delete()
+
+		second_parent.sub_agents = []
+		second_parent.save()
 		child.delete()
 		self.assertFalse(frappe.db.exists("AI Agent", child.name))
 
@@ -206,9 +217,7 @@ class TestSubAgentHierarchy(FrappeTestCase):
 			skills=[{"skill": first.name}, {"skill": second.name}],
 			allowed_tools=[{"tool": "read_file"}, {"tool": "grep"}, {"tool": "execute"}],
 		)
-		parent = self.make_agent(
-			agent_key="skilled-parent-x1", sub_agents=[{"sub_agent": child.name}]
-		)
+		parent = self.make_agent(agent_key="skilled-parent-x1", sub_agents=[{"sub_agent": child.name}])
 
 		config = resolve_external_runtime(parent.agent_key, include_sub_agents=True)
 		self.assertIsInstance(config, SubAgentAwareExternalRuntimeConfig)
@@ -263,9 +272,7 @@ class TestSubAgentHierarchy(FrappeTestCase):
 		delegate = config.sub_agents[0]
 		self.assertEqual(delegate.skills, ())
 		payload = config.model_dump(mode="json", by_alias=True)
-		self.assertEqual(
-			payload["subAgents"][0]["skills"], [], "the DTO always emits the child skills key"
-		)
+		self.assertEqual(payload["subAgents"][0]["skills"], [], "the DTO always emits the child skills key")
 
 	def test_drifted_child_skill_tools_fail_closed(self):
 		"""A skill that later requires unadvertised tools fails the whole contract.
@@ -280,9 +287,7 @@ class TestSubAgentHierarchy(FrappeTestCase):
 			skills=[{"skill": skill.name}],
 			allowed_tools=[{"tool": "read_file"}],
 		)
-		parent = self.make_agent(
-			agent_key="drift-parent-x1", sub_agents=[{"sub_agent": child.name}]
-		)
+		parent = self.make_agent(agent_key="drift-parent-x1", sub_agents=[{"sub_agent": child.name}])
 		# Sanity: the consistent configuration resolves before the drift.
 		resolve_external_runtime(parent.agent_key, include_sub_agents=True)
 
@@ -323,4 +328,6 @@ class TestSubAgentHierarchy(FrappeTestCase):
 		child = self.make_child()
 		self.make_agent(agent_key="legacy-parent-x1", sub_agents=[{"sub_agent": child.name}])
 		with self.assertRaises(frappe.ValidationError):
-			resolve_external_runtime("legacy-parent-x1", legacy_skill_instructions=True, include_sub_agents=True)
+			resolve_external_runtime(
+				"legacy-parent-x1", legacy_skill_instructions=True, include_sub_agents=True
+			)
