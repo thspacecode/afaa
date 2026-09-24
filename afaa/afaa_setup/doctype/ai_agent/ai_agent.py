@@ -147,18 +147,6 @@ class AIAgent(Document):
 					_("{0} is not a Sub Agent (Agent Level 2).").format(frappe.bold(row.sub_agent)),
 					frappe.ValidationError,
 				)
-			other_parent = frappe.db.get_value(
-				"AI Agent Sub Agent",
-				{"sub_agent": row.sub_agent, "parent": ("!=", self.name), "parenttype": "AI Agent"},
-				"parent",
-			)
-			if other_parent:
-				frappe.throw(
-					_("Sub Agent {0} is already referenced by {1}.").format(
-						frappe.bold(row.sub_agent), frappe.bold(other_parent)
-					),
-					frappe.ValidationError,
-				)
 
 	def on_trash(self):
 		if frappe.db.exists("AI Agent Sub Agent", {"sub_agent": self.name, "parenttype": "AI Agent"}):
