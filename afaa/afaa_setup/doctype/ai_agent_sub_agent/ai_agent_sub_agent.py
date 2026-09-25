@@ -17,6 +17,7 @@ class AIAgentSubAgent(Document):
 		from frappe.types import DF
 
 		max_calls: DF.Int
+		request_limit: DF.Int
 		sub_agent: DF.Link
 		timeout_seconds: DF.Int
 	# end: auto-generated types

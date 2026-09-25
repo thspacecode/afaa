@@ -123,8 +123,9 @@ class AIAgent(Document):
 			if row.sub_agent == self.name:
 				frappe.throw(_("An agent cannot delegate to itself."), frappe.ValidationError)
 			row.max_calls = cint(row.max_calls)
+			row.request_limit = cint(row.request_limit)
 			row.timeout_seconds = cint(row.timeout_seconds)
-			if row.max_calls < 0 or row.timeout_seconds < 0:
+			if row.max_calls < 0 or row.request_limit < 0 or row.timeout_seconds < 0:
 				frappe.throw(_("Sub-agent limits cannot be negative."), frappe.ValidationError)
 			target = frappe.db.get_value(
 				"AI Agent",

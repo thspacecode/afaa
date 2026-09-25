@@ -185,6 +185,7 @@ class ExternalSubAgent(BaseModel):
 	tools: tuple[ExternalSubAgentTool, ...] = Field(max_length=100)
 	skills: tuple[ExternalRuntimeSkill, ...] = Field(default=(), max_length=100)
 	max_calls: int | None = Field(default=None, alias="maxCalls", ge=1, le=1000)
+	request_limit: int | None = Field(default=None, alias="requestLimit", ge=1, le=500)
 	timeout_seconds: float | None = Field(default=None, alias="timeoutSeconds", ge=1, le=86400)
 
 
@@ -658,6 +659,7 @@ def _build_external_sub_agents(resolved) -> tuple[ExternalSubAgent, ...]:
 			"tools": tools,
 			"skills": build_sub_agent_skill_capabilities(child),
 			"maxCalls": child.max_calls,
+			"requestLimit": child.request_limit,
 			"timeoutSeconds": child.timeout_seconds,
 		}
 		child_mcp_servers = build_external_mcp_servers(child) if child.mcp_servers else ()

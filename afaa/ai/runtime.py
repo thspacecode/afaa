@@ -66,6 +66,7 @@ class ResolvedSubAgent(BaseModel):
 	skills: tuple[ResolvedSkill, ...] = ()
 	mcp_servers: tuple[ResolvedMCPServer, ...] = ()
 	max_calls: int | None = None
+	request_limit: int | None = None
 	timeout_seconds: float | None = None
 	timeout: float
 	retries: int
@@ -350,6 +351,7 @@ def _resolve_sub_agents(
 			include_mcp_servers=include_mcp_servers,
 		)
 		max_calls = int(row.max_calls or 0)
+		request_limit = int(row.request_limit or 0)
 		timeout_seconds = float(row.timeout_seconds or 0)
 		sub_agents.append(
 			ResolvedSubAgent(
@@ -362,6 +364,7 @@ def _resolve_sub_agents(
 				skills=resolved_child.skills,
 				mcp_servers=resolved_child.mcp_servers,
 				max_calls=max_calls if max_calls > 0 else None,
+				request_limit=request_limit if request_limit > 0 else None,
 				timeout_seconds=timeout_seconds if timeout_seconds > 0 else None,
 				timeout=resolved_child.timeout,
 				retries=resolved_child.retries,
