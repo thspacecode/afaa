@@ -28,7 +28,7 @@ function show_discovered_tools(frm, discovery) {
 		(frm.doc.allowed_tools || []).map((row) => row.tool_name).filter(Boolean)
 	);
 	const tools = (discovery.tools || []).map((tool) => ({
-		selected: 0,
+		name: tool.name,
 		tool_name: tool.name,
 		description: tool.description,
 		already_allowed: existingTools.has(tool.name) ? __("Yes") : __("No"),
@@ -53,19 +53,12 @@ function show_discovered_tools(frm, discovery) {
 				data: tools,
 				fields: [
 					{
-						fieldname: "selected",
-						fieldtype: "Check",
-						label: __("Add"),
-						in_list_view: 1,
-						columns: 1,
-					},
-					{
 						fieldname: "tool_name",
 						fieldtype: "Data",
 						label: __("Tool Name"),
 						read_only: 1,
 						in_list_view: 1,
-						columns: 3,
+						columns: 4,
 					},
 					{
 						fieldname: "description",
@@ -87,9 +80,11 @@ function show_discovered_tools(frm, discovery) {
 			},
 		],
 		primary_action_label: __("Add Selected Tools"),
-		primary_action(values) {
-			const selected = (values.tools || []).filter(
-				(row) => row.selected && !existingTools.has(row.tool_name)
+		primary_action() {
+			const grid = dialog.get_field("tools").grid;
+			const selectedRows = grid?.get_selected_children() || [];
+			const selected = selectedRows.filter(
+				(row) => !existingTools.has(row.tool_name)
 			);
 			if (!selected.length) {
 				frappe.msgprint(__("Select at least one tool that is not already allowed."));
@@ -130,7 +125,7 @@ function discovery_summary(discovery) {
 	const count = discovery.tools?.length || 0;
 
 	return `<p class="text-muted">${__(
-		"Connected to {0} ({1}) using {2}. Discovered {3} tool(s). Select the tools to add to the allowlist.",
+		"Connected to {0} ({1}) using {2}. Discovered {3} tool(s). Select the rows of the tools to add to the allowlist.",
 		[serverName, serverVersion, transport, count]
 	)}</p>`;
 }
