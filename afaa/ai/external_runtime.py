@@ -9,7 +9,7 @@ from typing import Any, Literal
 
 import frappe
 from frappe import _
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, ValidationError, field_validator, model_validator
 
 from afaa.ai.runtime import resolve_ai_agent
 from afaa.ai.skill_bundles import SkillBundleReference
@@ -547,18 +547,35 @@ def build_external_mcp_servers(resolved) -> tuple[ExternalRuntimeMCPServer, ...]
 			)
 		seen.add(server.effective_key)
 		token = server.token.get_secret_value() if server.token is not None else None
-		entries.append(
-			ExternalRuntimeMCPServer(
-				key=server.effective_key,
-				name=server.name,
-				url=server.url,
-				transport=server.transport or "auto",
-				allowedTools=server.allowed_tools,
-				authorizationToken=token,
-				connectTimeout=server.connect_timeout,
-				readTimeout=server.read_timeout,
+		# Surface stored-configuration violations of the wire-model constraints
+		# (key pattern, transport, timeouts) as a fixable validation error
+		# instead of an unhandled pydantic ValidationError (HTTP 500).
+		try:
+			entries.append(
+				ExternalRuntimeMCPServer(
+					key=server.effective_key,
+					name=server.name,
+					url=server.url,
+					transport=server.transport or "auto",
+					allowedTools=server.allowed_tools,
+					authorizationToken=token,
+					connectTimeout=server.connect_timeout,
+					readTimeout=server.read_timeout,
+				)
 			)
-		)
+		except ValidationError as error:
+			frappe.throw(
+				_("MCP attachment {0} has an invalid configuration: {1}").format(
+					frappe.bold(server.effective_key),
+					"; ".join(
+						"{0}: {1}".format(
+							(item.get("loc") or ("?",))[-1], item.get("msg", "")
+						)
+						for item in error.errors(include_url=False, include_input=False)
+					),
+				),
+				frappe.ValidationError,
+			)
 	return tuple(entries)
 
 
