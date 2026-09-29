@@ -511,6 +511,88 @@ class TestExternalRuntimeSchemaV5(MCPTestMixin, AFAATestSuite):
 		public = config.model_dump(mode="json", by_alias=True)
 		self.assertEqual(public["mcpServers"][0]["authorizationToken"], "**********")
 
+	def test_codex_v5_descriptor_allows_mcp_only_on_delegate(self):
+		from types import SimpleNamespace
+
+		from afaa.ai.external_runtime import (
+			ExternalMCPSubAgent,
+			ExternalSubAgentModel,
+			build_external_mcp_servers,
+			resolve_codex_external_runtime,
+		)
+
+		resolved = SimpleNamespace(
+			key="codex-parent",
+			name="Codex Parent",
+			agent_level="1",
+			timeout=120.0,
+			retries=2,
+			model=SimpleNamespace(
+				provider_type="openai_codex",
+				provider_account="codex-provider-account",
+				model_id="gpt-codex-test",
+				settings={},
+			),
+		)
+		account = SimpleNamespace(
+			name="codex-provider-account",
+			disabled=0,
+			oauth_status="Connected",
+			connected_user="owner@example.test",
+			external_account_id="account-123",
+		)
+		child_mcp_servers = build_external_mcp_servers(
+			SimpleNamespace(
+				mcp_servers=[
+					SimpleNamespace(
+						server_key="honeycomb",
+						account_key="default",
+						effective_key="honeycomb",
+						name="Honeycomb",
+						url="https://mcp.example.test/mcp",
+						transport="auto",
+						allowed_tools=(),
+						connect_timeout=10,
+						read_timeout=60,
+						auth_type=AUTH_TYPE_BEARER,
+						token=SecretStr("secret-token"),
+					)
+				]
+			)
+		)
+		child = ExternalMCPSubAgent(
+			agentId="afaa:otel-expert",
+			name="OTel Expert",
+			delegateName="otel-expert",
+			instructions=("Investigate telemetry.",),
+			model=ExternalSubAgentModel(
+				providerType="zai",
+				modelId="glm-test",
+				settings={},
+				timeout=120,
+				retries=2,
+			),
+			tools=(),
+			mcpServers=child_mcp_servers,
+		)
+
+		with patch("frappe.get_doc", return_value=account):
+			config = resolve_codex_external_runtime(
+				resolved,
+				("Coordinate delegates.",),
+				legacy_skill_instructions=False,
+				sub_agents=(child,),
+				mcp_servers=(),
+			)
+
+		self.assertIsInstance(config, MCPAwareCodexExternalRuntimeDescriptor)
+		self.assertEqual(config.mcp_servers, ())
+		self.assertEqual(config.sub_agents[0].mcp_servers[0].key, "honeycomb")
+		self.assertEqual(
+			config.private_sub_agents()[0]["mcpServers"][0]["authorizationToken"],
+			"secret-token",
+		)
+
 
 class TestMCPHostPolicy(MCPTestMixin, AFAATestSuite):
 	def test_validate_mcp_url_normalizes(self):

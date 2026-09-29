@@ -641,8 +641,9 @@ def resolve_codex_external_runtime(
 		**safe_configuration,
 		"configurationFingerprint": configuration_fingerprint(safe_configuration),
 	}
-	if mcp_servers:
-		# Strict mode on the Codex DTOs rejects list-to-tuple coercion.
+	if mcp_servers or delegates_have_mcp:
+		# Strict mode on the Codex DTOs rejects list-to-tuple coercion, including
+		# the empty parent list when only a delegate carries MCP.
 		dto_values["mcpServers"] = tuple(_mcp_server_payload(mcp_servers, private=True))
 	if delegates_have_mcp:
 		dto_values["subAgents"] = tuple(
