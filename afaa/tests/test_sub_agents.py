@@ -79,11 +79,24 @@ class TestSubAgentHierarchy(FrappeTestCase):
 	def test_worker_may_reference_enabled_level_two_sub_agents(self):
 		child = self.make_child()
 		parent = self.make_agent(
-			sub_agents=[{"sub_agent": child.name, "max_calls": 3, "timeout_seconds": 120}]
+			sub_agents=[
+				{"sub_agent": child.name, "max_calls": 3, "request_limit": 25, "timeout_seconds": 120}
+			]
 		)
 		self.assertEqual(parent.sub_agents[0].sub_agent, child.name)
 		self.assertEqual(parent.sub_agents[0].max_calls, 3)
+		self.assertEqual(parent.sub_agents[0].request_limit, 25)
 		self.assertEqual(parent.sub_agents[0].timeout_seconds, 120)
+
+	def test_sub_agent_request_limit_defaults_to_no_independent_budget(self):
+		child = self.make_child()
+		parent = self.make_agent(sub_agents=[{"sub_agent": child.name, "request_limit": 0}])
+		self.assertEqual(parent.sub_agents[0].request_limit, 0)
+
+	def test_sub_agent_request_limit_cannot_be_negative(self):
+		child = self.make_child()
+		with self.assertRaises(frappe.ValidationError):
+			self.make_agent(sub_agents=[{"sub_agent": child.name, "request_limit": -1}])
 
 	def test_non_worker_parents_cannot_configure_sub_agents(self):
 		child = self.make_child()
@@ -147,6 +160,7 @@ class TestSubAgentHierarchy(FrappeTestCase):
 		delegate = resolved.sub_agents[0]
 		self.assertEqual(delegate.key, child.agent_key)
 		self.assertEqual(delegate.max_calls, 2)
+		self.assertIsNone(delegate.request_limit)
 		self.assertIsNone(delegate.timeout_seconds)
 		self.assertEqual(delegate.model.provider_type, "openai")
 		self.assertEqual({tool.key for tool in delegate.tools}, {"read_file"})
@@ -159,7 +173,14 @@ class TestSubAgentHierarchy(FrappeTestCase):
 		child = self.make_child(allowed_tools=[{"tool": "read_file"}, {"tool": "frappe_get_doc"}])
 		self.make_agent(
 			agent_key="parent-agent-x1",
-			sub_agents=[{"sub_agent": child.name, "max_calls": 4, "timeout_seconds": 90}],
+			sub_agents=[
+				{
+					"sub_agent": child.name,
+					"max_calls": 4,
+					"request_limit": 42,
+					"timeout_seconds": 90,
+				}
+			],
 		)
 
 		legacy = resolve_external_runtime("parent-agent-x1")
@@ -176,6 +197,7 @@ class TestSubAgentHierarchy(FrappeTestCase):
 		self.assertEqual(delegate.agent_id, f"afaa:{child.agent_key}")
 		self.assertEqual(delegate.delegate_name, "Researcher")
 		self.assertEqual(delegate.max_calls, 4)
+		self.assertEqual(delegate.request_limit, 42)
 		self.assertEqual(delegate.timeout_seconds, 90.0)
 		self.assertEqual(delegate.model.provider_type, "openai")
 		self.assertNotIn("apiKey", delegate.model.model_dump(by_alias=True))

@@ -9,6 +9,7 @@
  "field_order": [
   "sub_agent",
   "max_calls",
+  "request_limit",
   "timeout_seconds"
  ],
  "fields": [
@@ -28,6 +29,15 @@
    "fieldtype": "Int",
    "in_list_view": 1,
    "label": "Max Calls",
+   "non_negative": 1
+  },
+  {
+   "default": "0",
+   "description": "Independent model request budget for this sub-agent per parent run. 0 keeps the deployment default.",
+   "fieldname": "request_limit",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Model Request Limit",
    "non_negative": 1
   },
   {
