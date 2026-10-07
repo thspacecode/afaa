@@ -13,6 +13,8 @@ from pydantic_ai import RunContext
 from pydantic_ai.exceptions import ModelHTTPError
 from pydantic_ai.models import ModelMessage, ModelRequestParameters, ModelResponse, StreamedResponse
 from pydantic_ai.models.openai import OpenAIResponsesModel
+from pydantic_ai.profiles import ModelProfile, merge_profile
+from pydantic_ai.profiles.openai_codex import openai_codex_model_profile
 from pydantic_ai.settings import ModelSettings
 
 
@@ -21,10 +23,17 @@ class CodexProviderError(frappe.ValidationError):
 
 
 class OpenAICodexResponsesModel(OpenAIResponsesModel):
-	"""Responses model that prevents storage and sanitizes subscription failures."""
+	"""Responses model that speaks the Codex wire dialect and sanitizes subscription failures."""
 
-	def __init__(self, *args, on_authentication_expired: Callable[[], None] | None = None, **kwargs):
-		super().__init__(*args, **kwargs)
+	def __init__(
+		self,
+		*args,
+		on_authentication_expired: Callable[[], None] | None = None,
+		profile: ModelProfile | None = None,
+		**kwargs,
+	):
+		model_name = kwargs["model_name"] if not args else args[0]
+		super().__init__(*args, profile=merge_codex_model_profile(model_name, profile), **kwargs)
 		self.on_authentication_expired = on_authentication_expired
 
 	def prepare_request(
@@ -73,6 +82,18 @@ class OpenAICodexResponsesModel(OpenAIResponsesModel):
 def force_codex_model_settings(settings: dict[str, Any]) -> dict[str, Any]:
 	"""Return runtime settings with immutable Codex privacy constraints applied."""
 	return {**settings, "openai_store": False}
+
+
+def merge_codex_model_profile(model_name: str, profile: ModelProfile | None = None) -> ModelProfile:
+	"""Merge the upstream Codex wire-dialect profile into the model profile.
+
+	`openai_responses_requires_streaming` forces ordinary `request()` calls through the
+	upstream stream-aggregation path (the Codex backend serves streaming responses only),
+	`openai_responses_requires_store_false` enforces `store=false` at the HTTP layer even
+	when runtime settings disagree, and unsupported sampling settings are dropped before
+	sending. The Codex flags are merged last so a caller-supplied profile cannot relax them.
+	"""
+	return merge_profile(profile, openai_codex_model_profile(model_name))
 
 
 def raise_codex_provider_error(
