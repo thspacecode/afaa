@@ -18,7 +18,7 @@ from afaa.ai.mcp import (
 	resolve_mcp_account,
 )
 from afaa.ai.prompts import parse_json_object, validate_jinja_template
-from afaa.utils.data import validate_key
+from afaa.utils.data import parse_bounded_seconds, validate_deadline_order, validate_key
 from afaa.utils.data import validate_unique_rows as validate_distinct_rows
 
 MAX_SUB_AGENTS_PER_PARENT = 10
@@ -122,6 +122,16 @@ class AIAgent(Document):
 		for row in self.sub_agents:
 			if row.sub_agent == self.name:
 				frappe.throw(_("An agent cannot delegate to itself."), frappe.ValidationError)
+			soft_timeout = parse_bounded_seconds(row.soft_timeout_seconds, label=_("Soft Timeout (Seconds)"))
+			if soft_timeout:
+				row.timeout_seconds = parse_bounded_seconds(row.timeout_seconds, label=_("Timeout (Seconds)"))
+				validate_deadline_order(
+					soft_timeout,
+					row.timeout_seconds,
+					soft_label=_("Soft Timeout (Seconds)"),
+					timeout_label=_("Timeout (Seconds)"),
+				)
+			row.soft_timeout_seconds = soft_timeout or 0
 			row.max_calls = cint(row.max_calls)
 			row.request_limit = cint(row.request_limit)
 			row.timeout_seconds = cint(row.timeout_seconds)

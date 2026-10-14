@@ -9,7 +9,17 @@ from typing import Any, Literal
 
 import frappe
 from frappe import _
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, ValidationError, field_validator, model_validator
+from pydantic import (
+	BaseModel,
+	ConfigDict,
+	Field,
+	SecretStr,
+	SerializerFunctionWrapHandler,
+	ValidationError,
+	field_validator,
+	model_serializer,
+	model_validator,
+)
 
 from afaa.ai.runtime import resolve_ai_agent
 from afaa.ai.skill_bundles import SkillBundleReference
@@ -187,6 +197,29 @@ class ExternalSubAgent(BaseModel):
 	max_calls: int | None = Field(default=None, alias="maxCalls", ge=1, le=1000)
 	request_limit: int | None = Field(default=None, alias="requestLimit", ge=1, le=500)
 	timeout_seconds: float | None = Field(default=None, alias="timeoutSeconds", ge=1, le=86400)
+	soft_timeout_seconds: int | None = Field(
+		default=None, alias="softTimeoutSeconds", ge=1, le=86400, strict=True
+	)
+
+	@model_validator(mode="after")
+	def soft_deadline_below_hard_deadline(self) -> ExternalSubAgent:
+		if self.soft_timeout_seconds is None:
+			return self
+		if self.timeout_seconds is None:
+			raise ValueError("softTimeoutSeconds requires a timeoutSeconds hard deadline")
+		if self.soft_timeout_seconds >= self.timeout_seconds:
+			raise ValueError("softTimeoutSeconds must be less than the timeoutSeconds hard deadline")
+		return self
+
+	@model_serializer(mode="wrap")
+	def omit_absent_soft_timeout(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+		"""Drop ``softTimeoutSeconds`` when unset so v4/v5 payloads keep their
+		pre-soft-timeout shape, and with it the old configuration fingerprints."""
+		payload = handler(self)
+		for key in ("softTimeoutSeconds", "soft_timeout_seconds"):
+			if payload.get(key) is None:
+				payload.pop(key, None)
+		return payload
 
 
 class SubAgentAwareExternalRuntimeConfig(StructuredExternalRuntimeConfig):
@@ -258,9 +291,7 @@ class ExternalRuntimeMCPServer(BaseModel):
 class ExternalMCPSubAgent(ExternalSubAgent):
 	"""Schema-v5 delegate descriptor carrying its own MCP connections."""
 
-	mcp_servers: tuple[ExternalRuntimeMCPServer, ...] = Field(
-		default=(), alias="mcpServers", max_length=10
-	)
+	mcp_servers: tuple[ExternalRuntimeMCPServer, ...] = Field(default=(), alias="mcpServers", max_length=10)
 
 	@model_validator(mode="after")
 	def unique_mcp_keys(self) -> ExternalMCPSubAgent:
@@ -446,9 +477,7 @@ def resolve_external_runtime(
 	mcp_servers = (
 		build_external_mcp_servers(resolved) if (include_mcp_servers and resolved.mcp_servers) else ()
 	)
-	delegates_have_mcp = any(
-		getattr(child, "mcp_servers", ()) for child in sub_agents
-	)
+	delegates_have_mcp = any(getattr(child, "mcp_servers", ()) for child in sub_agents)
 
 	if resolved.model.provider_type == "openai_codex":
 		return resolve_codex_external_runtime(
@@ -508,7 +537,9 @@ def resolve_external_runtime(
 		dto_values["mcpServers"] = _mcp_server_payload(mcp_servers, private=True)
 	if delegates_have_mcp:
 		dto_values["subAgents"] = tuple(
-			child.private_payload() if isinstance(child, ExternalMCPSubAgent) else child.model_dump(mode="json", by_alias=True)
+			child.private_payload()
+			if isinstance(child, ExternalMCPSubAgent)
+			else child.model_dump(mode="json", by_alias=True)
 			for child in sub_agents
 		)
 	return config_type.model_validate(dto_values)
@@ -569,9 +600,7 @@ def build_external_mcp_servers(resolved) -> tuple[ExternalRuntimeMCPServer, ...]
 				_("MCP attachment {0} has an invalid configuration: {1}").format(
 					frappe.bold(server.effective_key),
 					"; ".join(
-						"{0}: {1}".format(
-							(item.get("loc") or ("?",))[-1], item.get("msg", "")
-						)
+						"{0}: {1}".format((item.get("loc") or ("?",))[-1], item.get("msg", ""))
 						for item in error.errors(include_url=False, include_input=False)
 					),
 				),
@@ -616,9 +645,7 @@ def resolve_codex_external_runtime(
 		},
 	}
 	config_type: type[CodexExternalRuntimeDescriptor]
-	delegates_have_mcp = any(
-		getattr(child, "mcp_servers", ()) for child in sub_agents
-	)
+	delegates_have_mcp = any(getattr(child, "mcp_servers", ()) for child in sub_agents)
 	if legacy_skill_instructions:
 		config_type = CodexExternalRuntimeDescriptor
 	else:
@@ -648,7 +675,9 @@ def resolve_codex_external_runtime(
 		dto_values["mcpServers"] = tuple(_mcp_server_payload(mcp_servers, private=True))
 	if delegates_have_mcp:
 		dto_values["subAgents"] = tuple(
-			child.private_payload() if isinstance(child, ExternalMCPSubAgent) else child.model_dump(mode="json", by_alias=True)
+			child.private_payload()
+			if isinstance(child, ExternalMCPSubAgent)
+			else child.model_dump(mode="json", by_alias=True)
 			for child in sub_agents
 		)
 	return config_type.model_validate(dto_values)
@@ -679,12 +708,11 @@ def _build_external_sub_agents(resolved) -> tuple[ExternalSubAgent, ...]:
 			"maxCalls": child.max_calls,
 			"requestLimit": child.request_limit,
 			"timeoutSeconds": child.timeout_seconds,
+			"softTimeoutSeconds": child.soft_timeout_seconds,
 		}
 		child_mcp_servers = build_external_mcp_servers(child) if child.mcp_servers else ()
 		if child_mcp_servers:
-			sub_agents.append(
-				ExternalMCPSubAgent(**values, mcpServers=child_mcp_servers)
-			)
+			sub_agents.append(ExternalMCPSubAgent(**values, mcpServers=child_mcp_servers))
 		else:
 			sub_agents.append(ExternalSubAgent(**values))
 	return tuple(sub_agents)

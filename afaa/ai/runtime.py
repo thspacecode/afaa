@@ -17,6 +17,7 @@ from afaa.ai.mcp import (
 )
 from afaa.ai.prompts import parse_json_object, render_system_prompt
 from afaa.ai.provider import get_provider_class
+from afaa.utils.data import parse_bounded_seconds, validate_deadline_order
 
 
 class ResolvedModel(BaseModel):
@@ -68,6 +69,7 @@ class ResolvedSubAgent(BaseModel):
 	max_calls: int | None = None
 	request_limit: int | None = None
 	timeout_seconds: float | None = None
+	soft_timeout_seconds: int | None = None
 	timeout: float
 	retries: int
 
@@ -353,6 +355,24 @@ def _resolve_sub_agents(
 		max_calls = int(row.max_calls or 0)
 		request_limit = int(row.request_limit or 0)
 		timeout_seconds = float(row.timeout_seconds or 0)
+		soft_timeout_seconds = parse_bounded_seconds(
+			getattr(row, "soft_timeout_seconds", None),
+			label=_("Soft Timeout (Seconds)"),
+			unset=None,
+		)
+		if soft_timeout_seconds:
+			# Recheck the persisted hard deadline so drifted rows fail closed
+			# instead of emitting a delegation the child cannot honor.
+			hard_timeout = parse_bounded_seconds(
+				row.timeout_seconds, label=_("Timeout (Seconds)"), unset=None
+			)
+			validate_deadline_order(
+				soft_timeout_seconds,
+				hard_timeout,
+				soft_label=_("Soft Timeout (Seconds)"),
+				timeout_label=_("Timeout (Seconds)"),
+			)
+			timeout_seconds = float(hard_timeout)
 		sub_agents.append(
 			ResolvedSubAgent(
 				name=child.agent_name,
@@ -366,6 +386,7 @@ def _resolve_sub_agents(
 				max_calls=max_calls if max_calls > 0 else None,
 				request_limit=request_limit if request_limit > 0 else None,
 				timeout_seconds=timeout_seconds if timeout_seconds > 0 else None,
+				soft_timeout_seconds=soft_timeout_seconds,
 				timeout=resolved_child.timeout,
 				retries=resolved_child.retries,
 			)
