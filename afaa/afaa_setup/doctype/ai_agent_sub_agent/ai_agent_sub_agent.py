@@ -18,6 +18,7 @@ class AIAgentSubAgent(Document):
 
 		max_calls: DF.Int
 		request_limit: DF.Int
+		soft_timeout_seconds: DF.Int
 		sub_agent: DF.Link
 		timeout_seconds: DF.Int
 	# end: auto-generated types
