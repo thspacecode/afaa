@@ -104,6 +104,8 @@ The tools execute as the current Frappe user and use the Document and permission
 
 ## Development
 
+Keep development and documentation changes focused for easier review.
+
 ```bash
 cd apps/afaa
 pre-commit run --all-files
