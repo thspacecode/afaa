@@ -132,7 +132,7 @@ class TestOpenAICodexProvider(TestCase):
 		):
 			models = provider.list_models()
 
-		self.assertEqual(models, ["gpt-6.1-sol", "gpt-codex-visible"])
+		self.assertEqual(models, ["gpt-6-luna", "gpt-6-sol", "gpt-6.1-sol", "gpt-codex-visible"])
 		get.assert_called_once_with(
 			f"{CODEX_BASE_URL}/models",
 			params={"client_version": "0.153.2"},
@@ -158,7 +158,7 @@ class TestOpenAICodexProvider(TestCase):
 			patch.object(provider, "resolve_access_token", return_value="oauth-access-token"),
 			patch("afaa.ai.provider.openai_codex_provider.requests.get", return_value=response),
 		):
-			self.assertEqual(provider.list_models(), ["gpt-6.1-sol"])
+			self.assertEqual(provider.list_models(), ["gpt-6-luna", "gpt-6-sol", "gpt-6.1-sol"])
 
 	def test_empty_catalog_still_includes_known_models(self):
 		provider = OpenAICodexProvider(SimpleNamespace(external_account_id="account-123"))
@@ -168,7 +168,7 @@ class TestOpenAICodexProvider(TestCase):
 			patch.object(provider, "resolve_access_token", return_value="oauth-access-token"),
 			patch("afaa.ai.provider.openai_codex_provider.requests.get", return_value=response),
 		):
-			self.assertEqual(provider.list_models(), ["gpt-6.1-sol"])
+			self.assertEqual(provider.list_models(), ["gpt-6-luna", "gpt-6-sol", "gpt-6.1-sol"])
 
 	def test_catalog_maps_subscription_http_errors(self):
 		provider = OpenAICodexProvider(SimpleNamespace(external_account_id="account-123"))

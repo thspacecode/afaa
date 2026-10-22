@@ -19,7 +19,7 @@ CODEX_BASE_URL = "https://chatgpt.com/backend-api/codex"
 CODEX_CLIENT_VERSION = "0.153.2"
 # Discovery can omit working models. Keep this list small and explicitly verified;
 # catalog membership is not a guarantee of access for every subscription.
-CODEX_KNOWN_MODEL_IDS = ("gpt-6.1-sol",)
+CODEX_KNOWN_MODEL_IDS = ("gpt-6-luna", "gpt-6-sol", "gpt-6.1-sol")
 
 
 class OpenAICodexProvider(BaseProvider):
