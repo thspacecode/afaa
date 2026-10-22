@@ -109,7 +109,7 @@ class TestOpenAICodexProvider(TestCase):
 		self.assertNotIn("provider-secret", str(raised.exception))
 		provider.mark_authentication_expired.assert_not_called()
 
-	def test_lists_only_visible_api_models_from_codex_catalog(self):
+	def test_merges_known_models_with_only_visible_api_models_from_codex_catalog(self):
 		provider = OpenAICodexProvider(SimpleNamespace(external_account_id="account-123"))
 		response = Mock(
 			ok=True,
@@ -132,7 +132,7 @@ class TestOpenAICodexProvider(TestCase):
 		):
 			models = provider.list_models()
 
-		self.assertEqual(models, ["gpt-codex-visible"])
+		self.assertEqual(models, ["gpt-6.1-sol", "gpt-codex-visible"])
 		get.assert_called_once_with(
 			f"{CODEX_BASE_URL}/models",
 			params={"client_version": "0.153.2"},
@@ -144,6 +144,31 @@ class TestOpenAICodexProvider(TestCase):
 			timeout=30,
 		)
 		self.assertNotIn("/v1/models", get.call_args.args[0])
+
+	def test_known_catalog_models_are_deduplicated(self):
+		provider = OpenAICodexProvider(SimpleNamespace(external_account_id="account-123"))
+		response = Mock(ok=True, status_code=200)
+		response.json.return_value = {
+			"models": [
+				{"slug": " gpt-6.1-sol ", "supported_in_api": True, "visibility": "list"},
+				{"slug": "gpt-6.1-sol", "supported_in_api": True, "visibility": "list"},
+			]
+		}
+		with (
+			patch.object(provider, "resolve_access_token", return_value="oauth-access-token"),
+			patch("afaa.ai.provider.openai_codex_provider.requests.get", return_value=response),
+		):
+			self.assertEqual(provider.list_models(), ["gpt-6.1-sol"])
+
+	def test_empty_catalog_still_includes_known_models(self):
+		provider = OpenAICodexProvider(SimpleNamespace(external_account_id="account-123"))
+		response = Mock(ok=True, status_code=200)
+		response.json.return_value = {"models": []}
+		with (
+			patch.object(provider, "resolve_access_token", return_value="oauth-access-token"),
+			patch("afaa.ai.provider.openai_codex_provider.requests.get", return_value=response),
+		):
+			self.assertEqual(provider.list_models(), ["gpt-6.1-sol"])
 
 	def test_catalog_maps_subscription_http_errors(self):
 		provider = OpenAICodexProvider(SimpleNamespace(external_account_id="account-123"))
