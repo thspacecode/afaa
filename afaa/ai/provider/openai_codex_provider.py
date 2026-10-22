@@ -17,6 +17,9 @@ if TYPE_CHECKING:
 CODEX_BASE_URL = "https://chatgpt.com/backend-api/codex"
 # The catalog expects a compatible Codex CLI version, not the AFAA package version.
 CODEX_CLIENT_VERSION = "0.153.2"
+# Discovery can omit working models. Keep this list small and explicitly verified;
+# catalog membership is not a guarantee of access for every subscription.
+CODEX_KNOWN_MODEL_IDS = ("gpt-6-luna", "gpt-6-sol", "gpt-6.1-sol")
 
 
 class OpenAICodexProvider(BaseProvider):
@@ -140,7 +143,7 @@ class OpenAICodexProvider(BaseProvider):
 		if not isinstance(payload, dict) or not isinstance(payload.get("models"), list):
 			frappe.throw(_("OpenAI Codex returned an invalid model catalog."))
 
-		return [
+		discovered_model_ids = {
 			model["slug"].strip()
 			for model in payload["models"]
 			if isinstance(model, dict)
@@ -148,7 +151,8 @@ class OpenAICodexProvider(BaseProvider):
 			and model.get("visibility") == "list"
 			and isinstance(model.get("slug"), str)
 			and model["slug"].strip()
-		]
+		}
+		return sorted(discovered_model_ids.union(CODEX_KNOWN_MODEL_IDS))
 
 	def get_account_id(self) -> str:
 		account_id = (self.provider_account_doc.external_account_id or "").strip()
