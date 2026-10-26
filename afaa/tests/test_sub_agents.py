@@ -150,6 +150,25 @@ class TestSubAgentHierarchy(FrappeTestCase):
 		child = self.make_child(allowed_tools=[{"tool": "read_file"}, {"tool": "execute"}])
 		self.assertEqual({row.tool for row in child.allowed_tools}, {"read_file", "execute"})
 
+	def test_resolution_intersects_before_validating_excluded_children(self):
+		allowed = self.make_child(allowed_tools=[])
+		excluded = self.make_child(allowed_tools=[])
+		space_only = self.make_child(allowed_tools=[])
+		parent = self.make_agent(sub_agents=[{"sub_agent": excluded.name}, {"sub_agent": allowed.name}])
+		frappe.db.set_value("AI Agent", excluded.name, "disabled", 1, update_modified=False)
+		selection = frozenset({allowed.name, space_only.name})
+		resolved = resolve_ai_agent(parent.name, include_sub_agents=True, allowed_sub_agents=selection)
+		self.assertEqual([child.key for child in resolved.sub_agents], [allowed.name])
+		config = resolve_external_runtime(parent.name, include_sub_agents=True, allowed_sub_agents=selection)
+		self.assertEqual([child.agent_id for child in config.sub_agents], [f"afaa:{allowed.name}"])
+		# An empty intersection is parent-only; None retains strict standalone resolution.
+		config = resolve_external_runtime(
+			parent.name, include_sub_agents=True, allowed_sub_agents=frozenset()
+		)
+		self.assertIsInstance(config, StructuredExternalRuntimeConfig)
+		with self.assertRaises(frappe.ValidationError):
+			resolve_ai_agent(parent.name, include_sub_agents=True)
+
 	def test_resolution_includes_fail_closed_children(self):
 		child = self.make_child()
 		parent = self.make_agent(sub_agents=[{"sub_agent": child.name, "max_calls": 2}])

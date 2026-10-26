@@ -144,6 +144,7 @@ def resolve_ai_agent(
 	require_enabled: bool = True,
 	include_sub_agents: bool = False,
 	include_mcp_servers: bool = False,
+	allowed_sub_agents: frozenset[str] | None = None,
 ) -> ResolvedAIAgent:
 	agent = frappe.get_doc("AI Agent", agent_name)
 	if require_enabled and agent.disabled:
@@ -158,6 +159,7 @@ def resolve_ai_agent(
 			context,
 			require_enabled=require_enabled,
 			include_mcp_servers=include_mcp_servers,
+			allowed_sub_agents=allowed_sub_agents,
 		)
 		if (include_sub_agents and agent_level_number(agent_level) == 1)
 		else ()
@@ -321,9 +323,11 @@ def _resolve_sub_agents(
 	*,
 	require_enabled: bool,
 	include_mcp_servers: bool = False,
+	allowed_sub_agents: frozenset[str] | None = None,
 ) -> list[ResolvedSubAgent]:
-	"""Resolve each configured Level 2 delegate of one Level 1 agent.
+	"""Resolve configured Level 2 delegates intersected with the optional caller allowlist.
 
+	``None`` resolves all configured children; an empty allowlist resolves none.
 	Any drifted, disabled, or misconfigured child fails closed so callers can
 	degrade the whole delegation contract rather than silently dropping it.
 	"""
@@ -332,6 +336,10 @@ def _resolve_sub_agents(
 	sub_agents: list[ResolvedSubAgent] = []
 	for row in getattr(agent, "sub_agents", None) or []:
 		if not row.sub_agent:
+			continue
+		# None preserves standalone AFAA behavior; an empty set permits no delegates.
+		# Filter before loading or validating children outside the caller's scope.
+		if allowed_sub_agents is not None and row.sub_agent not in allowed_sub_agents:
 			continue
 		if row.sub_agent == agent.name:
 			frappe.throw(
