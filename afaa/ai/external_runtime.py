@@ -437,13 +437,16 @@ def resolve_external_runtime(
 	legacy_skill_instructions: bool = False,
 	include_sub_agents: bool = False,
 	include_mcp_servers: bool = False,
+	allowed_sub_agents: frozenset[str] | None = None,
 ) -> ExternalRuntime:
 	"""Resolve one enabled AFAA agent for execution outside the Frappe process.
 
 	Structured skills are the default. Existing threads may explicitly request the
 	legacy contract, which flattens skill instructions into the agent instructions.
 	``include_sub_agents`` additionally resolves the Level 2 delegates of a Level 1
-	agent into a schema-v4 contract; any drifted child configuration raises so the
+	agent into a schema-v4 contract. ``allowed_sub_agents`` optionally restricts
+	those delegates by agent key before resolution; an empty set selects none.
+	Any drifted selected child configuration raises so the
 	caller can degrade to the previous contract. ``include_mcp_servers`` resolves
 	the agent's MCP connections into a schema-v5 contract; MCP is administrator
 	intent and never silently dropped, so the caller must not degrade it.
@@ -453,6 +456,7 @@ def resolve_external_runtime(
 		context,
 		include_sub_agents=include_sub_agents,
 		include_mcp_servers=include_mcp_servers,
+		allowed_sub_agents=allowed_sub_agents,
 	)
 	if legacy_skill_instructions:
 		instructions = _non_empty_instructions(
